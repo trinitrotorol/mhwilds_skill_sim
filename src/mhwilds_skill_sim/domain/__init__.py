@@ -1,6 +1,7 @@
 """Domain value objects and rules."""
 
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
+from mhwilds_skill_sim.domain.equipment import EquipmentPart
 from mhwilds_skill_sim.domain.skill import SkillContribution
 from mhwilds_skill_sim.domain.slot import (
     DecorationKind,
@@ -12,6 +13,7 @@ __all__ = [
     "DecorationDefinition",
     "DecorationKind",
     "DecorationSlot",
+    "EquipmentPart",
     "SkillContribution",
     "can_place_decoration",
 ]
