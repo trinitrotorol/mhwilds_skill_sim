@@ -25,3 +25,20 @@ class DecorationSlot:
 
         if self.level < 1:
             raise ValueError("level must be at least 1")
+
+
+def can_place_decoration(
+    *,
+    required_slot: DecorationSlot,
+    available_slot: DecorationSlot,
+) -> bool:
+    if not isinstance(required_slot, DecorationSlot):
+        raise TypeError("required_slot must be DecorationSlot")
+
+    if not isinstance(available_slot, DecorationSlot):
+        raise TypeError("available_slot must be DecorationSlot")
+
+    return (
+        required_slot.kind == available_slot.kind
+        and required_slot.level <= available_slot.level
+    )

@@ -4,7 +4,11 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from mhwilds_skill_sim.domain import DecorationKind, DecorationSlot
+from mhwilds_skill_sim.domain import (
+    DecorationKind,
+    DecorationSlot,
+    can_place_decoration,
+)
 
 
 def test_decoration_kind_values_match_public_contract() -> None:
@@ -82,3 +86,101 @@ def test_domain_package_exports_public_slot_types() -> None:
 
     assert ExportedDecorationKind is DecorationKind
     assert ExportedDecorationSlot is DecorationSlot
+
+
+@pytest.mark.parametrize(
+    ("required_slot", "available_slot"),
+    [
+        (
+            DecorationSlot(DecorationKind.WEAPON, 1),
+            DecorationSlot(DecorationKind.WEAPON, 1),
+        ),
+        (
+            DecorationSlot(DecorationKind.WEAPON, 1),
+            DecorationSlot(DecorationKind.WEAPON, 2),
+        ),
+        (
+            DecorationSlot(DecorationKind.ARMOR, 2),
+            DecorationSlot(DecorationKind.ARMOR, 4),
+        ),
+        (
+            DecorationSlot(DecorationKind.ARMOR, 4),
+            DecorationSlot(DecorationKind.ARMOR, 5),
+        ),
+    ],
+)
+def test_can_place_decoration_accepts_matching_kind_with_enough_level(
+    required_slot: DecorationSlot,
+    available_slot: DecorationSlot,
+) -> None:
+    assert can_place_decoration(
+        required_slot=required_slot,
+        available_slot=available_slot,
+    )
+
+
+@pytest.mark.parametrize(
+    ("required_slot", "available_slot"),
+    [
+        (
+            DecorationSlot(DecorationKind.WEAPON, 3),
+            DecorationSlot(DecorationKind.WEAPON, 2),
+        ),
+        (
+            DecorationSlot(DecorationKind.ARMOR, 4),
+            DecorationSlot(DecorationKind.ARMOR, 3),
+        ),
+        (
+            DecorationSlot(DecorationKind.WEAPON, 1),
+            DecorationSlot(DecorationKind.ARMOR, 1),
+        ),
+        (
+            DecorationSlot(DecorationKind.ARMOR, 1),
+            DecorationSlot(DecorationKind.WEAPON, 1),
+        ),
+        (
+            DecorationSlot(DecorationKind.WEAPON, 4),
+            DecorationSlot(DecorationKind.ARMOR, 5),
+        ),
+    ],
+)
+def test_can_place_decoration_rejects_kind_mismatch_or_insufficient_level(
+    required_slot: DecorationSlot,
+    available_slot: DecorationSlot,
+) -> None:
+    assert not can_place_decoration(
+        required_slot=required_slot,
+        available_slot=available_slot,
+    )
+
+
+def test_can_place_decoration_rejects_invalid_required_slot() -> None:
+    with pytest.raises(TypeError, match="required_slot"):
+        can_place_decoration(
+            required_slot="weapon",  # type: ignore[arg-type]
+            available_slot=DecorationSlot(DecorationKind.WEAPON, 1),
+        )
+
+
+def test_can_place_decoration_rejects_invalid_available_slot() -> None:
+    with pytest.raises(TypeError, match="available_slot"):
+        can_place_decoration(
+            required_slot=DecorationSlot(DecorationKind.WEAPON, 1),
+            available_slot="weapon",  # type: ignore[arg-type]
+        )
+
+
+def test_can_place_decoration_requires_keyword_arguments() -> None:
+    with pytest.raises(TypeError):
+        can_place_decoration(  # type: ignore[misc]
+            DecorationSlot(DecorationKind.WEAPON, 1),
+            DecorationSlot(DecorationKind.WEAPON, 1),
+        )
+
+
+def test_domain_package_exports_can_place_decoration() -> None:
+    from mhwilds_skill_sim.domain import (
+        can_place_decoration as exported_can_place_decoration,
+    )
+
+    assert exported_can_place_decoration is can_place_decoration
