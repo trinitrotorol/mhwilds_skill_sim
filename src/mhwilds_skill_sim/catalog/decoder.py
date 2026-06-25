@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
+from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.skill import SkillContribution
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
@@ -10,6 +11,10 @@ _SKILL_CONTRIBUTION_KEYS = frozenset(("skill_id", "level"))
 _SKILL_CONTRIBUTION_KEY_ORDER = ("skill_id", "level")
 _DECORATION_SLOT_KEYS = frozenset(("kind", "level"))
 _DECORATION_SLOT_KEY_ORDER = ("kind", "level")
+_DECORATION_DEFINITION_KEYS = frozenset(
+    ("decoration_id", "required_slot", "skills"),
+)
+_DECORATION_DEFINITION_KEY_ORDER = ("decoration_id", "required_slot", "skills")
 
 
 def decode_skill_contribution(
@@ -85,6 +90,63 @@ def _decode_decoration_kind(value: object) -> DecorationKind:
         return DecorationKind.ARMOR
 
     raise ValueError("kind must be one of: weapon, armor")
+
+
+def decode_decoration_definition(
+    *,
+    value: object,
+    path: str = "$",
+) -> DecorationDefinition:
+    if type(value) is not dict:
+        raise CatalogDecodeError(
+            path=path, detail="expected decoration definition object"
+        )
+
+    missing_keys = [key for key in _DECORATION_DEFINITION_KEY_ORDER if key not in value]
+    extra_keys = [key for key in value if key not in _DECORATION_DEFINITION_KEYS]
+
+    if missing_keys or extra_keys:
+        detail_parts: list[str] = []
+        if missing_keys:
+            detail_parts.append(f"missing keys: {', '.join(missing_keys)}")
+        if extra_keys:
+            detail_parts.append(
+                "unexpected keys: "
+                + ", ".join(_format_key(key) for key in _sort_keys(extra_keys)),
+            )
+        raise CatalogDecodeError(path=path, detail="; ".join(detail_parts))
+
+    required_slot = decode_decoration_slot(
+        value=value["required_slot"],
+        path=f"{path}.required_slot",
+    )
+    skills = _decode_decoration_skills(value=value["skills"], path=f"{path}.skills")
+
+    try:
+        return DecorationDefinition(
+            decoration_id=value["decoration_id"],
+            required_slot=required_slot,
+            skills=skills,
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(path=path, detail=str(exc)) from exc
+
+
+def _decode_decoration_skills(
+    *,
+    value: object,
+    path: str,
+) -> tuple[SkillContribution, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(path=path, detail="skills must be list")
+
+    if not value:
+        raise CatalogDecodeError(path=path, detail="skills must not be empty")
+
+    return tuple(
+        decode_skill_contribution(value=skill, path=f"{path}[{index}]")
+        for index, skill in enumerate(value)
+    )
 
 
 def _sort_keys(keys: list[object]) -> list[object]:
