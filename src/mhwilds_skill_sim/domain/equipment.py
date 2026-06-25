@@ -1,6 +1,12 @@
 """Equipment domain value objects."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from enum import StrEnum
+
+from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.slot import DecorationSlot
 
 
 class EquipmentPart(StrEnum):
@@ -11,3 +17,49 @@ class EquipmentPart(StrEnum):
     WAIST = "waist"
     LEGS = "legs"
     CHARM = "charm"
+
+
+@dataclass(frozen=True, slots=True)
+class EquipmentDefinition:
+    equipment_id: str
+    part: EquipmentPart
+    skills: tuple[SkillContribution, ...]
+    slots: tuple[DecorationSlot, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.equipment_id) is not str:
+            raise TypeError("equipment_id must be str")
+
+        if self.equipment_id == "":
+            raise ValueError("equipment_id must not be empty")
+
+        if self.equipment_id.strip() == "":
+            raise ValueError("equipment_id must not be blank")
+
+        if self.equipment_id != self.equipment_id.strip():
+            raise ValueError(
+                "equipment_id must not have leading or trailing whitespace",
+            )
+
+        if not isinstance(self.part, EquipmentPart):
+            raise TypeError("part must be EquipmentPart")
+
+        if type(self.skills) is not tuple:
+            raise TypeError("skills must be tuple")
+
+        seen_skill_ids: set[str] = set()
+        for skill in self.skills:
+            if not isinstance(skill, SkillContribution):
+                raise TypeError("skills must contain only SkillContribution")
+
+            if skill.skill_id in seen_skill_ids:
+                raise ValueError("skills must not contain duplicate skill_id")
+
+            seen_skill_ids.add(skill.skill_id)
+
+        if type(self.slots) is not tuple:
+            raise TypeError("slots must be tuple")
+
+        for slot in self.slots:
+            if not isinstance(slot, DecorationSlot):
+                raise TypeError("slots must contain only DecorationSlot")
