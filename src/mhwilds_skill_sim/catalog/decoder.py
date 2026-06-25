@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
+from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import SkillContribution
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
@@ -15,6 +16,9 @@ _DECORATION_DEFINITION_KEYS = frozenset(
     ("decoration_id", "required_slot", "skills"),
 )
 _DECORATION_DEFINITION_KEY_ORDER = ("decoration_id", "required_slot", "skills")
+_EQUIPMENT_DEFINITION_KEYS = frozenset(("equipment_id", "part", "skills", "slots"))
+_EQUIPMENT_DEFINITION_KEY_ORDER = ("equipment_id", "part", "skills", "slots")
+_EQUIPMENT_PART_VALUES = ("weapon", "head", "chest", "arms", "waist", "legs", "charm")
 
 
 def decode_skill_contribution(
@@ -146,6 +150,99 @@ def _decode_decoration_skills(
     return tuple(
         decode_skill_contribution(value=skill, path=f"{path}[{index}]")
         for index, skill in enumerate(value)
+    )
+
+
+def decode_equipment_definition(
+    *,
+    value: object,
+    path: str = "$",
+) -> EquipmentDefinition:
+    if type(value) is not dict:
+        raise CatalogDecodeError(
+            path=path, detail="expected equipment definition object"
+        )
+
+    missing_keys = [key for key in _EQUIPMENT_DEFINITION_KEY_ORDER if key not in value]
+    extra_keys = [key for key in value if key not in _EQUIPMENT_DEFINITION_KEYS]
+
+    if missing_keys or extra_keys:
+        detail_parts: list[str] = []
+        if missing_keys:
+            detail_parts.append(f"missing keys: {', '.join(missing_keys)}")
+        if extra_keys:
+            detail_parts.append(
+                "unexpected keys: "
+                + ", ".join(_format_key(key) for key in _sort_keys(extra_keys)),
+            )
+        raise CatalogDecodeError(path=path, detail="; ".join(detail_parts))
+
+    try:
+        part = _decode_equipment_part(value["part"])
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(path=f"{path}.part", detail=str(exc)) from exc
+
+    skills = _decode_equipment_skills(value=value["skills"], path=f"{path}.skills")
+    slots = _decode_equipment_slots(value=value["slots"], path=f"{path}.slots")
+
+    try:
+        return EquipmentDefinition(
+            equipment_id=value["equipment_id"],
+            part=part,
+            skills=skills,
+            slots=slots,
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(path=path, detail=str(exc)) from exc
+
+
+def _decode_equipment_part(value: object) -> EquipmentPart:
+    if type(value) is not str:
+        raise TypeError("part must be str")
+
+    if value == EquipmentPart.WEAPON.value:
+        return EquipmentPart.WEAPON
+    if value == EquipmentPart.HEAD.value:
+        return EquipmentPart.HEAD
+    if value == EquipmentPart.CHEST.value:
+        return EquipmentPart.CHEST
+    if value == EquipmentPart.ARMS.value:
+        return EquipmentPart.ARMS
+    if value == EquipmentPart.WAIST.value:
+        return EquipmentPart.WAIST
+    if value == EquipmentPart.LEGS.value:
+        return EquipmentPart.LEGS
+    if value == EquipmentPart.CHARM.value:
+        return EquipmentPart.CHARM
+
+    raise ValueError("part must be one of: " + ", ".join(_EQUIPMENT_PART_VALUES))
+
+
+def _decode_equipment_skills(
+    *,
+    value: object,
+    path: str,
+) -> tuple[SkillContribution, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(path=path, detail="skills must be list")
+
+    return tuple(
+        decode_skill_contribution(value=skill, path=f"{path}[{index}]")
+        for index, skill in enumerate(value)
+    )
+
+
+def _decode_equipment_slots(
+    *,
+    value: object,
+    path: str,
+) -> tuple[DecorationSlot, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(path=path, detail="slots must be list")
+
+    return tuple(
+        decode_decoration_slot(value=slot, path=f"{path}[{index}]")
+        for index, slot in enumerate(value)
     )
 
 
