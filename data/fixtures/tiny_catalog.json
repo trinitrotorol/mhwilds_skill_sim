@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "equipment": [
+    {
+      "equipment_id": "fixture:weapon:training-blade",
+      "part": "weapon",
+      "skills": [
+        {
+          "skill_id": "skill:attack-boost",
+          "level": 1
+        }
+      ],
+      "slots": [
+        {
+          "kind": "weapon",
+          "level": 2
+        },
+        {
+          "kind": "weapon",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "equipment_id": "fixture:head:precision-alpha",
+      "part": "head",
+      "skills": [
+        {
+          "skill_id": "skill:critical-eye",
+          "level": 1
+        }
+      ],
+      "slots": [
+        {
+          "kind": "armor",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "equipment_id": "fixture:head:tenderizer-beta",
+      "part": "head",
+      "skills": [
+        {
+          "skill_id": "skill:weakness-exploit",
+          "level": 1
+        }
+      ],
+      "slots": [
+        {
+          "kind": "armor",
+          "level": 2
+        }
+      ]
+    },
+    {
+      "equipment_id": "fixture:chest:power-mail",
+      "part": "chest",
+      "skills": [
+        {
+          "skill_id": "skill:attack-boost",
+          "level": 1
+        }
+      ],
+      "slots": [
+        {
+          "kind": "armor",
+          "level": 2
+        }
+      ]
+    },
+    {
+      "equipment_id": "fixture:arms:socket-braces",
+      "part": "arms",
+      "skills": [],
+      "slots": [
+        {
+          "kind": "armor",
+          "level": 1
+        },
+        {
+          "kind": "armor",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "equipment_id": "fixture:waist:precision-coil",
+      "part": "waist",
+      "skills": [
+        {
+          "skill_id": "skill:critical-eye",
+          "level": 1
+        }
+      ],
+      "slots": []
+    },
+    {
+      "equipment_id": "fixture:legs:tenderizer-greaves",
+      "part": "legs",
+      "skills": [
+        {
+          "skill_id": "skill:weakness-exploit",
+          "level": 1
+        }
+      ],
+      "slots": [
+        {
+          "kind": "armor",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "equipment_id": "fixture:charm:power",
+      "part": "charm",
+      "skills": [
+        {
+          "skill_id": "skill:attack-boost",
+          "level": 1
+        }
+      ],
+      "slots": []
+    },
+    {
+      "equipment_id": "fixture:charm:precision",
+      "part": "charm",
+      "skills": [
+        {
+          "skill_id": "skill:critical-eye",
+          "level": 1
+        }
+      ],
+      "slots": []
+    }
+  ],
+  "decorations": [
+    {
+      "decoration_id": "fixture:decoration:weapon-power-1",
+      "required_slot": {
+        "kind": "weapon",
+        "level": 1
+      },
+      "skills": [
+        {
+          "skill_id": "skill:attack-boost",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "decoration_id": "fixture:decoration:weapon-precision-2",
+      "required_slot": {
+        "kind": "weapon",
+        "level": 2
+      },
+      "skills": [
+        {
+          "skill_id": "skill:critical-eye",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "decoration_id": "fixture:decoration:armor-power-1",
+      "required_slot": {
+        "kind": "armor",
+        "level": 1
+      },
+      "skills": [
+        {
+          "skill_id": "skill:attack-boost",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "decoration_id": "fixture:decoration:armor-tenderizer-2",
+      "required_slot": {
+        "kind": "armor",
+        "level": 2
+      },
+      "skills": [
+        {
+          "skill_id": "skill:weakness-exploit",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "decoration_id": "fixture:decoration:armor-combination-2",
+      "required_slot": {
+        "kind": "armor",
+        "level": 2
+      },
+      "skills": [
+        {
+          "skill_id": "skill:attack-boost",
+          "level": 1
+        },
+        {
+          "skill_id": "skill:critical-eye",
+          "level": 1
+        }
+      ]
+    }
+  ]
+}
