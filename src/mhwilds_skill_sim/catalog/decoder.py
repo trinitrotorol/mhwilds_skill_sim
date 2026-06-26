@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
+from mhwilds_skill_sim.catalog.model import Catalog
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import SkillContribution
@@ -19,6 +20,8 @@ _DECORATION_DEFINITION_KEY_ORDER = ("decoration_id", "required_slot", "skills")
 _EQUIPMENT_DEFINITION_KEYS = frozenset(("equipment_id", "part", "skills", "slots"))
 _EQUIPMENT_DEFINITION_KEY_ORDER = ("equipment_id", "part", "skills", "slots")
 _EQUIPMENT_PART_VALUES = ("weapon", "head", "chest", "arms", "waist", "legs", "charm")
+_CATALOG_KEYS = frozenset(("schema_version", "equipment", "decorations"))
+_CATALOG_KEY_ORDER = ("schema_version", "equipment", "decorations")
 
 
 def decode_skill_contribution(
@@ -243,6 +246,93 @@ def _decode_equipment_slots(
     return tuple(
         decode_decoration_slot(value=slot, path=f"{path}[{index}]")
         for index, slot in enumerate(value)
+    )
+
+
+def decode_catalog(
+    *,
+    value: object,
+    path: str = "$",
+) -> Catalog:
+    if type(value) is not dict:
+        raise CatalogDecodeError(path=path, detail="expected catalog object")
+
+    missing_keys = [key for key in _CATALOG_KEY_ORDER if key not in value]
+    extra_keys = [key for key in value if key not in _CATALOG_KEYS]
+
+    if missing_keys or extra_keys:
+        detail_parts: list[str] = []
+        if missing_keys:
+            detail_parts.append(f"missing keys: {', '.join(missing_keys)}")
+        if extra_keys:
+            detail_parts.append(
+                "unexpected keys: "
+                + ", ".join(_format_key(key) for key in _sort_keys(extra_keys)),
+            )
+        raise CatalogDecodeError(path=path, detail="; ".join(detail_parts))
+
+    try:
+        schema_version = _decode_schema_version(value["schema_version"])
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(
+            path=f"{path}.schema_version",
+            detail=str(exc),
+        ) from exc
+
+    equipment = _decode_catalog_equipment(
+        value=value["equipment"],
+        path=f"{path}.equipment",
+    )
+    decorations = _decode_catalog_decorations(
+        value=value["decorations"],
+        path=f"{path}.decorations",
+    )
+
+    try:
+        return Catalog(
+            schema_version=schema_version,
+            equipment=equipment,
+            decorations=decorations,
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(path=path, detail=str(exc)) from exc
+
+
+def _decode_schema_version(value: object) -> int:
+    if type(value) is not int:
+        raise TypeError("schema_version must be int")
+
+    if value < 1:
+        raise ValueError("schema_version must be at least 1")
+
+    return value
+
+
+def _decode_catalog_equipment(
+    *,
+    value: object,
+    path: str,
+) -> tuple[EquipmentDefinition, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(path=path, detail="equipment must be list")
+
+    return tuple(
+        decode_equipment_definition(value=equipment, path=f"{path}[{index}]")
+        for index, equipment in enumerate(value)
+    )
+
+
+def _decode_catalog_decorations(
+    *,
+    value: object,
+    path: str,
+) -> tuple[DecorationDefinition, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(path=path, detail="decorations must be list")
+
+    return tuple(
+        decode_decoration_definition(value=decoration, path=f"{path}[{index}]")
+        for index, decoration in enumerate(value)
     )
 
 
