@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition
+from mhwilds_skill_sim.domain.skill import SkillContribution, aggregate_skill_levels
 from mhwilds_skill_sim.validation.equipment_selection import (
     EquipmentSelectionIssue,
     validate_equipment_selection,
@@ -61,3 +62,39 @@ def validate_build(
         equipment_selection_issues=equipment_selection_issues,
         decoration_placement_issues=decoration_placement_issues,
     )
+
+
+def aggregate_valid_build_skill_levels(
+    *,
+    equipment: tuple[EquipmentDefinition, ...],
+    decorations: tuple[DecorationDefinition, ...],
+    placements: tuple[DecorationPlacement, ...],
+) -> dict[str, int]:
+    validation_result = validate_build(
+        equipment=equipment,
+        decorations=decorations,
+        placements=placements,
+    )
+    if (
+        validation_result.equipment_selection_issues
+        or validation_result.decoration_placement_issues
+    ):
+        raise ValueError(
+            "build must have no validation issues before skill aggregation"
+        )
+
+    contributions: list[SkillContribution] = []
+    for definition in equipment:
+        contributions.extend(definition.skills)
+
+    decorations_by_id = {
+        definition.decoration_id: definition for definition in decorations
+    }
+    for placement in placements:
+        definition = decorations_by_id.get(placement.decoration_id)
+        if definition is None:
+            raise ValueError("decoration_id must exist for skill aggregation")
+
+        contributions.extend(definition.skills)
+
+    return aggregate_skill_levels(contributions=tuple(contributions))
