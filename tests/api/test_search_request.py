@@ -279,6 +279,7 @@ def test_decode_search_request_payload_public_import_and_api_all() -> None:
         api.build_candidate_search_result_to_response
         is build_candidate_search_result_to_response
     )
+    assert type(api.__all__) is list
     assert api.__all__ == [
         "SearchRequest",
         "build_candidate_search_result_to_response",

@@ -425,8 +425,10 @@ def test_api_all_matches_specification() -> None:
     import mhwilds_skill_sim.api as api
 
     assert api.__all__ == [
+        "SearchRequest",
         "build_candidate_search_result_to_response",
         "build_candidate_to_response",
+        "decode_search_request_payload",
     ]
 
 
@@ -435,8 +437,10 @@ def test_search_response_scope_regression() -> None:
     import mhwilds_skill_sim.api.search_response as search_response
 
     for name in ("SearchRequest", "SolverResult", "BuildResult"):
-        assert not hasattr(api, name)
         assert not hasattr(search_response, name)
+
+    for name in ("SolverResult", "BuildResult"):
+        assert not hasattr(api, name)
 
     source = Path(search_response.__file__).read_text(encoding="utf-8")
 
