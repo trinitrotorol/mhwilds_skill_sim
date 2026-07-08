@@ -8,6 +8,9 @@ from mhwilds_skill_sim.solver.decoration import (
     enumerate_decoration_placement_combinations,
 )
 from mhwilds_skill_sim.solver.equipment import enumerate_equipment_selections
+from mhwilds_skill_sim.solver.filtering import (
+    filter_build_candidates_by_skill_requirements,
+)
 from mhwilds_skill_sim.solver.requirements import (
     SkillRequirement,
     skill_levels_satisfy_requirements,
@@ -19,5 +22,6 @@ __all__ = [
     "enumerate_build_candidates",
     "enumerate_decoration_placement_combinations",
     "enumerate_equipment_selections",
+    "filter_build_candidates_by_skill_requirements",
     "skill_levels_satisfy_requirements",
 ]
