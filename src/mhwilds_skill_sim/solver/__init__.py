@@ -21,9 +21,14 @@ from mhwilds_skill_sim.solver.requirements import (
 from mhwilds_skill_sim.solver.search import (
     search_build_candidates_by_skill_requirements,
 )
+from mhwilds_skill_sim.solver.search_result import (
+    BuildCandidateSearchResult,
+    search_limited_catalog_build_candidates_by_skill_requirements,
+)
 
 __all__ = [
     "BuildCandidate",
+    "BuildCandidateSearchResult",
     "SkillRequirement",
     "enumerate_build_candidates",
     "enumerate_decoration_placement_combinations",
@@ -31,5 +36,6 @@ __all__ = [
     "filter_build_candidates_by_skill_requirements",
     "search_catalog_build_candidates_by_skill_requirements",
     "search_build_candidates_by_skill_requirements",
+    "search_limited_catalog_build_candidates_by_skill_requirements",
     "skill_levels_satisfy_requirements",
 ]
