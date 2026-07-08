@@ -1,5 +1,6 @@
 """Build validation helpers."""
 
+from mhwilds_skill_sim.validation.build import BuildValidationResult, validate_build
 from mhwilds_skill_sim.validation.decoration import (
     can_place_decoration_in_equipment_slot,
 )
@@ -16,12 +17,14 @@ from mhwilds_skill_sim.validation.placement_validation import (
 )
 
 __all__ = [
+    "BuildValidationResult",
     "DecorationPlacement",
     "DecorationPlacementIssue",
     "DecorationPlacementIssueCode",
     "EquipmentSelectionIssue",
     "EquipmentSelectionIssueCode",
     "can_place_decoration_in_equipment_slot",
+    "validate_build",
     "validate_decoration_placements",
     "validate_equipment_selection",
 ]
