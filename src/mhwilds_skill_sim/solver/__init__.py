@@ -4,6 +4,9 @@ from mhwilds_skill_sim.solver.build import (
     BuildCandidate,
     enumerate_build_candidates,
 )
+from mhwilds_skill_sim.solver.catalog_search import (
+    search_catalog_build_candidates_by_skill_requirements,
+)
 from mhwilds_skill_sim.solver.decoration import (
     enumerate_decoration_placement_combinations,
 )
@@ -26,6 +29,7 @@ __all__ = [
     "enumerate_decoration_placement_combinations",
     "enumerate_equipment_selections",
     "filter_build_candidates_by_skill_requirements",
+    "search_catalog_build_candidates_by_skill_requirements",
     "search_build_candidates_by_skill_requirements",
     "skill_levels_satisfy_requirements",
 ]
