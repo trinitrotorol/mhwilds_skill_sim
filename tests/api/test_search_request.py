@@ -285,6 +285,7 @@ def test_decode_search_request_payload_public_import_and_api_all() -> None:
         "build_candidate_search_result_to_response",
         "build_candidate_to_response",
         "decode_search_request_payload",
+        "search_catalog_build_candidates_from_payload",
     ]
 
 

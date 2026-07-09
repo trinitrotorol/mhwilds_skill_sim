@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 import mhwilds_skill_sim.api as api
 from mhwilds_skill_sim.api.search_request import (
     SearchRequest,
@@ -9,6 +11,9 @@ from mhwilds_skill_sim.api.search_response import (
     build_candidate_search_result_to_response,
     build_candidate_to_response,
 )
+from mhwilds_skill_sim.api.search_service import (
+    search_catalog_build_candidates_from_payload,
+)
 
 
 EXPECTED_API_ALL = [
@@ -16,6 +21,7 @@ EXPECTED_API_ALL = [
     "build_candidate_search_result_to_response",
     "build_candidate_to_response",
     "decode_search_request_payload",
+    "search_catalog_build_candidates_from_payload",
 ]
 
 
@@ -32,11 +38,27 @@ def test_api_exports_are_direct_references() -> None:
         api.build_candidate_search_result_to_response
         is build_candidate_search_result_to_response
     )
+    assert (
+        api.search_catalog_build_candidates_from_payload
+        is search_catalog_build_candidates_from_payload
+    )
 
 
-def test_api_hasattr_reflects_public_exports() -> None:
-    assert hasattr(api, "SearchRequest") is True
-    assert hasattr(api, "decode_search_request_payload") is True
+@pytest.mark.parametrize(
+    "name",
+    [
+        "SearchRequest",
+        "build_candidate_search_result_to_response",
+        "build_candidate_to_response",
+        "decode_search_request_payload",
+        "search_catalog_build_candidates_from_payload",
+    ],
+)
+def test_api_hasattr_reflects_public_exports(name: str) -> None:
+    assert hasattr(api, name) is True
+
+
+def test_api_hasattr_rejects_missing_export() -> None:
     assert hasattr(api, "__task_034_missing_export__") is False
 
 
