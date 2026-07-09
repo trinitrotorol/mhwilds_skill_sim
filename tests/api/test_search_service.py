@@ -305,14 +305,19 @@ def test_rejects_invalid_catalog_type(catalog: object) -> None:
         )
 
 
-def test_rejects_catalog_subclass() -> None:
+def test_accepts_catalog_subclass() -> None:
     catalog = CatalogSubclass(schema_version=1, equipment=(), decorations=())
 
-    with pytest.raises(TypeError, match="catalog"):
-        search_catalog_build_candidates_from_payload(
-            catalog=catalog,
-            payload=payload(),
-        )
+    response = search_catalog_build_candidates_from_payload(
+        catalog=catalog,
+        payload=payload(),
+    )
+
+    assert response == {
+        "candidates": [],
+        "total_count": 0,
+        "truncated": False,
+    }
 
 
 @pytest.mark.parametrize("payload_value", [None, "payload", []])

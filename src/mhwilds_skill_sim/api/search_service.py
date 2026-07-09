@@ -17,7 +17,7 @@ def search_catalog_build_candidates_from_payload(
     catalog: Catalog,
     payload: object,
 ) -> dict[str, object]:
-    if type(catalog) is not Catalog:
+    if not isinstance(catalog, Catalog):
         raise TypeError("catalog must be Catalog")
 
     request = decode_search_request_payload(payload=payload)
