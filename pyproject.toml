@@ -7,7 +7,9 @@ name = "mhwilds-skill-sim"
 version = "0.1.0"
 description = "Minimal package scaffold for Monster Hunter Wilds skill simulation."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115,<1",
+]
 
 [project.optional-dependencies]
 dev = [

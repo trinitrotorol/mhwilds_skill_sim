@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 import mhwilds_skill_sim.api as api
+from mhwilds_skill_sim.api.app import app, create_app
 from mhwilds_skill_sim.api.search_request import (
     SearchRequest,
     decode_search_request_payload,
@@ -18,8 +19,10 @@ from mhwilds_skill_sim.api.search_service import (
 
 EXPECTED_API_ALL = [
     "SearchRequest",
+    "app",
     "build_candidate_search_result_to_response",
     "build_candidate_to_response",
+    "create_app",
     "decode_search_request_payload",
     "search_catalog_build_candidates_from_payload",
 ]
@@ -32,12 +35,14 @@ def test_api_all_is_plain_list_in_expected_order() -> None:
 
 def test_api_exports_are_direct_references() -> None:
     assert api.SearchRequest is SearchRequest
+    assert api.app is app
     assert api.decode_search_request_payload is decode_search_request_payload
     assert api.build_candidate_to_response is build_candidate_to_response
     assert (
         api.build_candidate_search_result_to_response
         is build_candidate_search_result_to_response
     )
+    assert api.create_app is create_app
     assert (
         api.search_catalog_build_candidates_from_payload
         is search_catalog_build_candidates_from_payload
@@ -48,8 +53,10 @@ def test_api_exports_are_direct_references() -> None:
     "name",
     [
         "SearchRequest",
+        "app",
         "build_candidate_search_result_to_response",
         "build_candidate_to_response",
+        "create_app",
         "decode_search_request_payload",
         "search_catalog_build_candidates_from_payload",
     ],
