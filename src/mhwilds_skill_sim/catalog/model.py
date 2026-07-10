@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition
-from mhwilds_skill_sim.domain.skill import SkillDefinition
+from mhwilds_skill_sim.domain.skill import SkillDefinition, SkillKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,3 +61,27 @@ class Catalog:
                 raise ValueError("skills must not contain duplicate skill_id")
 
             seen_skill_ids.add(skill.skill_id)
+
+        skills_by_id = {skill.skill_id: skill for skill in self.skills}
+        for equipment in self.equipment:
+            if equipment.series_skill_id is not None:
+                series_skill = skills_by_id.get(equipment.series_skill_id)
+                if series_skill is None:
+                    raise ValueError(
+                        "equipment series_skill_id must reference an existing skill"
+                    )
+                if series_skill.kind is not SkillKind.SERIES:
+                    raise ValueError(
+                        "equipment series_skill_id must reference a series skill"
+                    )
+
+            if equipment.group_skill_id is not None:
+                group_skill = skills_by_id.get(equipment.group_skill_id)
+                if group_skill is None:
+                    raise ValueError(
+                        "equipment group_skill_id must reference an existing skill"
+                    )
+                if group_skill.kind is not SkillKind.GROUP:
+                    raise ValueError(
+                        "equipment group_skill_id must reference a group skill"
+                    )

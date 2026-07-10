@@ -25,6 +25,8 @@ class EquipmentDefinition:
     part: EquipmentPart
     skills: tuple[SkillContribution, ...]
     slots: tuple[DecorationSlot, ...]
+    series_skill_id: str | None = None
+    group_skill_id: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.equipment_id) is not str:
@@ -63,3 +65,33 @@ class EquipmentDefinition:
         for slot in self.slots:
             if not isinstance(slot, DecorationSlot):
                 raise TypeError("slots must contain only DecorationSlot")
+
+        if self.series_skill_id is not None:
+            if type(self.series_skill_id) is not str:
+                raise TypeError("series_skill_id must be str or None")
+
+            if self.series_skill_id == "":
+                raise ValueError("series_skill_id must not be empty")
+
+            if self.series_skill_id.strip() == "":
+                raise ValueError("series_skill_id must not be blank")
+
+            if self.series_skill_id != self.series_skill_id.strip():
+                raise ValueError(
+                    "series_skill_id must not have leading or trailing whitespace"
+                )
+
+        if self.group_skill_id is not None:
+            if type(self.group_skill_id) is not str:
+                raise TypeError("group_skill_id must be str or None")
+
+            if self.group_skill_id == "":
+                raise ValueError("group_skill_id must not be empty")
+
+            if self.group_skill_id.strip() == "":
+                raise ValueError("group_skill_id must not be blank")
+
+            if self.group_skill_id != self.group_skill_id.strip():
+                raise ValueError(
+                    "group_skill_id must not have leading or trailing whitespace"
+                )

@@ -31,6 +31,7 @@ from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_PATH = ROOT / "data" / "fixtures" / "tiny_catalog.json"
+ABSENT = object()
 
 
 def load_tiny_catalog() -> dict[str, object]:
@@ -39,13 +40,21 @@ def load_tiny_catalog() -> dict[str, object]:
 
 def equipment_value(
     equipment_id: str = "fixture:weapon:training-blade",
+    *,
+    series_skill_id: object = ABSENT,
+    group_skill_id: object = ABSENT,
 ) -> dict[str, object]:
-    return {
+    value: dict[str, object] = {
         "equipment_id": equipment_id,
         "part": "weapon",
         "skills": [{"skill_id": "skill:attack-boost", "level": 1}],
         "slots": [{"kind": "weapon", "level": 1}],
     }
+    if series_skill_id is not ABSENT:
+        value["series_skill_id"] = series_skill_id
+    if group_skill_id is not ABSENT:
+        value["group_skill_id"] = group_skill_id
+    return value
 
 
 def alternate_equipment_value(
@@ -86,6 +95,26 @@ def skill_definition_value(
         "kind": kind,
         "ranks": [skill_rank_value()] if ranks is None else ranks,
     }
+
+
+def series_skill_definition_value(
+    skill_id: str = "skill:fixture-series-bonus",
+) -> dict[str, object]:
+    return skill_definition_value(
+        skill_id=skill_id,
+        kind="set",
+        ranks=[skill_rank_value(1, 2), skill_rank_value(2, 4)],
+    )
+
+
+def group_skill_definition_value(
+    skill_id: str = "skill:fixture-group-bonus",
+) -> dict[str, object]:
+    return skill_definition_value(
+        skill_id=skill_id,
+        kind="group",
+        ranks=[skill_rank_value(1, 3)],
+    )
 
 
 def alternate_decoration_value(
@@ -554,6 +583,257 @@ def test_existing_equipment_definition_decoder_still_works() -> None:
         skills=(SkillContribution("skill:attack-boost", 1),),
         slots=(DecorationSlot(DecorationKind.WEAPON, 1),),
     )
+    assert equipment.series_skill_id is None
+    assert equipment.group_skill_id is None
+
+
+def test_decode_equipment_definition_accepts_explicit_null_memberships() -> None:
+    equipment = decode_equipment_definition(
+        value=equipment_value(series_skill_id=None, group_skill_id=None),
+    )
+
+    assert equipment.series_skill_id is None
+    assert equipment.group_skill_id is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_series_skill_id", "expected_group_skill_id"),
+    [
+        (
+            equipment_value(series_skill_id="skill:fixture-series-bonus"),
+            "skill:fixture-series-bonus",
+            None,
+        ),
+        (
+            equipment_value(group_skill_id="skill:fixture-group-bonus"),
+            None,
+            "skill:fixture-group-bonus",
+        ),
+        (
+            equipment_value(
+                series_skill_id="skill:fixture-series-bonus",
+                group_skill_id="skill:fixture-group-bonus",
+            ),
+            "skill:fixture-series-bonus",
+            "skill:fixture-group-bonus",
+        ),
+    ],
+)
+def test_decode_equipment_definition_accepts_memberships(
+    value: dict[str, object],
+    expected_series_skill_id: str | None,
+    expected_group_skill_id: str | None,
+) -> None:
+    equipment = decode_equipment_definition(value=value)
+
+    assert equipment.series_skill_id == expected_series_skill_id
+    assert equipment.group_skill_id == expected_group_skill_id
+
+
+def test_decode_equipment_membership_keys_are_order_independent() -> None:
+    value = {
+        "group_skill_id": "skill:fixture-group-bonus",
+        "slots": [{"kind": "armor", "level": 1}],
+        "series_skill_id": "skill:fixture-series-bonus",
+        "skills": [],
+        "part": "head",
+        "equipment_id": "fixture:head:precision-alpha",
+    }
+
+    equipment = decode_equipment_definition(value=value)
+
+    assert equipment.series_skill_id == "skill:fixture-series-bonus"
+    assert equipment.group_skill_id == "skill:fixture-group-bonus"
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+@pytest.mark.parametrize(
+    ("invalid_value", "expected_cause"),
+    [
+        (True, TypeError),
+        (1, TypeError),
+        (1.5, TypeError),
+        ([], TypeError),
+        ("", ValueError),
+        (" ", ValueError),
+        (" skill:fixture-bonus", ValueError),
+        ("skill:fixture-bonus ", ValueError),
+    ],
+)
+def test_decode_equipment_definition_wraps_invalid_membership_errors(
+    field_name: str,
+    invalid_value: object,
+    expected_cause: type[Exception],
+) -> None:
+    value = equipment_value()
+    value[field_name] = invalid_value
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment")
+
+    assert exc_info.value.path == "$.equipment"
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+def test_decode_equipment_definition_rejects_membership_string_subclass(
+    field_name: str,
+) -> None:
+    class MembershipId(str):
+        pass
+
+    value = equipment_value()
+    value[field_name] = MembershipId("skill:fixture-bonus")
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment")
+
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, TypeError)
+
+
+def test_decode_equipment_definition_still_rejects_unknown_keys() -> None:
+    value = equipment_value(
+        series_skill_id="skill:fixture-series-bonus",
+        group_skill_id="skill:fixture-group-bonus",
+    )
+    value["unexpected"] = True
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment")
+
+    assert exc_info.value.path == "$.equipment"
+    assert "unexpected" in exc_info.value.detail
+
+
+@pytest.mark.parametrize("required_key", ["equipment_id", "part", "skills", "slots"])
+def test_decode_equipment_definition_still_requires_original_keys(
+    required_key: str,
+) -> None:
+    value = equipment_value(
+        series_skill_id="skill:fixture-series-bonus",
+        group_skill_id="skill:fixture-group-bonus",
+    )
+    del value[required_key]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment")
+
+    assert exc_info.value.path == "$.equipment"
+    assert required_key in exc_info.value.detail
+
+
+def test_decode_catalog_accepts_valid_equipment_membership_references() -> None:
+    value = catalog_value()
+    value["equipment"] = [
+        equipment_value(
+            series_skill_id="skill:fixture-series-bonus",
+            group_skill_id="skill:fixture-group-bonus",
+        )
+    ]
+    value["skills"] = [
+        series_skill_definition_value(),
+        group_skill_definition_value(),
+    ]
+
+    catalog = decode_catalog(value=value)
+
+    assert catalog.equipment[0].series_skill_id == "skill:fixture-series-bonus"
+    assert catalog.equipment[0].group_skill_id == "skill:fixture-group-bonus"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "missing_skill_id"),
+    [
+        ("series_skill_id", "skill:missing-series"),
+        ("group_skill_id", "skill:missing-group"),
+    ],
+)
+def test_decode_catalog_wraps_missing_membership_reference_at_root(
+    field_name: str,
+    missing_skill_id: str,
+) -> None:
+    equipment = equipment_value()
+    equipment[field_name] = missing_skill_id
+    value = catalog_value()
+    value["equipment"] = [equipment]
+    value["skills"] = []
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert "equipment" in exc_info.value.detail
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "wrong_skill"),
+    [
+        (
+            "series_skill_id",
+            skill_definition_value("skill:wrong-armor", "armor"),
+        ),
+        (
+            "series_skill_id",
+            skill_definition_value("skill:wrong-weapon", "weapon"),
+        ),
+        (
+            "series_skill_id",
+            group_skill_definition_value("skill:wrong-group"),
+        ),
+        (
+            "group_skill_id",
+            skill_definition_value("skill:wrong-armor", "armor"),
+        ),
+        (
+            "group_skill_id",
+            skill_definition_value("skill:wrong-weapon", "weapon"),
+        ),
+        (
+            "group_skill_id",
+            series_skill_definition_value("skill:wrong-series"),
+        ),
+    ],
+)
+def test_decode_catalog_wraps_wrong_kind_membership_reference_at_root(
+    field_name: str,
+    wrong_skill: dict[str, object],
+) -> None:
+    equipment = equipment_value()
+    equipment[field_name] = wrong_skill["skill_id"]
+    value = catalog_value()
+    value["equipment"] = [equipment]
+    value["skills"] = [wrong_skill]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert "equipment" in exc_info.value.detail
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_decode_catalog_without_membership_keys_remains_backward_compatible() -> None:
+    catalog = decode_catalog(value=catalog_value())
+
+    assert catalog.equipment[0].series_skill_id is None
+    assert catalog.equipment[0].group_skill_id is None
+
+
+def test_decode_catalog_accepts_explicit_null_memberships_without_skills() -> None:
+    value = catalog_value()
+    value["equipment"] = [
+        equipment_value(series_skill_id=None, group_skill_id=None),
+    ]
+
+    catalog = decode_catalog(value=value)
+
+    assert catalog.equipment[0].series_skill_id is None
+    assert catalog.equipment[0].group_skill_id is None
 
 
 def test_catalog_decode_error_still_imports_directly() -> None:

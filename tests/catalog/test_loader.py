@@ -127,6 +127,77 @@ def test_load_catalog_reads_series_and_group_rank_thresholds() -> None:
     ] == [3]
 
 
+def test_load_catalog_preserves_exact_equipment_memberships() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    assert {
+        equipment.equipment_id: (
+            equipment.series_skill_id,
+            equipment.group_skill_id,
+        )
+        for equipment in catalog.equipment
+    } == {
+        "fixture:weapon:training-blade": (None, None),
+        "fixture:head:precision-alpha": (
+            "skill:fixture-series-bonus",
+            "skill:fixture-group-bonus",
+        ),
+        "fixture:head:tenderizer-beta": (None, None),
+        "fixture:chest:power-mail": (
+            "skill:fixture-series-bonus",
+            "skill:fixture-group-bonus",
+        ),
+        "fixture:arms:socket-braces": (
+            "skill:fixture-series-bonus",
+            "skill:fixture-group-bonus",
+        ),
+        "fixture:waist:precision-coil": (
+            "skill:fixture-series-bonus",
+            None,
+        ),
+        "fixture:legs:tenderizer-greaves": (None, None),
+        "fixture:charm:power": (None, None),
+        "fixture:charm:precision": (None, None),
+    }
+
+
+def test_load_catalog_returns_expected_membership_contributors() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    assert [
+        equipment.equipment_id
+        for equipment in catalog.equipment
+        if equipment.series_skill_id == "skill:fixture-series-bonus"
+    ] == [
+        "fixture:head:precision-alpha",
+        "fixture:chest:power-mail",
+        "fixture:arms:socket-braces",
+        "fixture:waist:precision-coil",
+    ]
+    assert [
+        equipment.equipment_id
+        for equipment in catalog.equipment
+        if equipment.group_skill_id == "skill:fixture-group-bonus"
+    ] == [
+        "fixture:head:precision-alpha",
+        "fixture:chest:power-mail",
+        "fixture:arms:socket-braces",
+    ]
+
+
+def test_load_catalog_membership_references_have_expected_skill_kinds() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+    skills_by_id = {skill.skill_id: skill for skill in catalog.skills}
+
+    for equipment in catalog.equipment:
+        if equipment.series_skill_id is not None:
+            assert equipment.series_skill_id in skills_by_id
+            assert skills_by_id[equipment.series_skill_id].kind is SkillKind.SERIES
+        if equipment.group_skill_id is not None:
+            assert equipment.group_skill_id in skills_by_id
+            assert skills_by_id[equipment.group_skill_id].kind is SkillKind.GROUP
+
+
 def test_load_catalog_is_keyword_only() -> None:
     signature = inspect.signature(load_catalog)
 

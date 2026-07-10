@@ -33,12 +33,16 @@ def equipment(
     equipment_id: str = "equipment:weapon:training-blade",
     skills: tuple[SkillContribution, ...] | None = None,
     slots: tuple[DecorationSlot, ...] | None = None,
+    series_skill_id: str | None = None,
+    group_skill_id: str | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
         part=EquipmentPart.WEAPON,
         skills=skills if skills is not None else (skill(),),
         slots=slots if slots is not None else (weapon_slot(1),),
+        series_skill_id=series_skill_id,
+        group_skill_id=group_skill_id,
     )
 
 
@@ -59,6 +63,26 @@ def skill_definition(
     ranks: tuple[SkillRankDefinition, ...] = (SkillRankDefinition(1, None),),
 ) -> SkillDefinition:
     return SkillDefinition(skill_id=skill_id, kind=kind, ranks=ranks)
+
+
+def series_skill_definition(
+    skill_id: str = "skill:fixture-series-bonus",
+) -> SkillDefinition:
+    return skill_definition(
+        skill_id,
+        SkillKind.SERIES,
+        (SkillRankDefinition(1, 2), SkillRankDefinition(2, 4)),
+    )
+
+
+def group_skill_definition(
+    skill_id: str = "skill:fixture-group-bonus",
+) -> SkillDefinition:
+    return skill_definition(
+        skill_id,
+        SkillKind.GROUP,
+        (SkillRankDefinition(1, 3),),
+    )
 
 
 def catalog(
@@ -99,6 +123,173 @@ def test_can_create_catalog_with_equipment_and_decorations() -> None:
     assert created.equipment == equipment_items
     assert created.decorations == decoration_items
     assert created.skills == ()
+
+
+def test_legacy_catalog_without_memberships_or_skills_remains_valid() -> None:
+    legacy_equipment = EquipmentDefinition(
+        equipment_id="equipment:weapon:training-blade",
+        part=EquipmentPart.WEAPON,
+        skills=(skill(),),
+        slots=(weapon_slot(),),
+    )
+
+    created = Catalog(
+        schema_version=1,
+        equipment=(legacy_equipment,),
+        decorations=(),
+    )
+
+    assert created.equipment == (legacy_equipment,)
+    assert created.skills == ()
+
+
+def test_catalog_accepts_valid_series_membership_reference() -> None:
+    series_skill = series_skill_definition()
+    equipment_item = equipment(series_skill_id=series_skill.skill_id)
+
+    created = catalog(
+        equipment_items=(equipment_item,),
+        skill_items=(series_skill,),
+    )
+
+    assert created.equipment[0].series_skill_id == series_skill.skill_id
+
+
+def test_catalog_accepts_valid_group_membership_reference() -> None:
+    group_skill = group_skill_definition()
+    equipment_item = equipment(group_skill_id=group_skill.skill_id)
+
+    created = catalog(
+        equipment_items=(equipment_item,),
+        skill_items=(group_skill,),
+    )
+
+    assert created.equipment[0].group_skill_id == group_skill.skill_id
+
+
+def test_catalog_accepts_simultaneous_membership_references() -> None:
+    series_skill = series_skill_definition()
+    group_skill = group_skill_definition()
+    equipment_item = equipment(
+        series_skill_id=series_skill.skill_id,
+        group_skill_id=group_skill.skill_id,
+    )
+
+    created = catalog(
+        equipment_items=(equipment_item,),
+        skill_items=(series_skill, group_skill),
+    )
+
+    assert created.equipment == (equipment_item,)
+
+
+def test_catalog_allows_unused_series_and_group_skill_definitions() -> None:
+    skill_items = (series_skill_definition(), group_skill_definition())
+
+    created = catalog(skill_items=skill_items)
+
+    assert created.skills == skill_items
+
+
+@pytest.mark.parametrize(
+    ("field_name", "missing_skill_id"),
+    [
+        ("series_skill_id", "skill:missing-series"),
+        ("group_skill_id", "skill:missing-group"),
+    ],
+)
+def test_catalog_rejects_missing_membership_reference(
+    field_name: str,
+    missing_skill_id: str,
+) -> None:
+    memberships = {field_name: missing_skill_id}
+    equipment_item = EquipmentDefinition(
+        equipment_id="equipment:weapon:training-blade",
+        part=EquipmentPart.WEAPON,
+        skills=(skill(),),
+        slots=(weapon_slot(),),
+        **memberships,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(equipment_items=(equipment_item,), skill_items=())
+
+    assert "equipment" in str(exc_info.value)
+    assert field_name in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "wrong_skill",
+    [
+        skill_definition("skill:armor", SkillKind.ARMOR),
+        skill_definition("skill:weapon", SkillKind.WEAPON),
+        group_skill_definition("skill:group"),
+    ],
+)
+def test_catalog_rejects_series_reference_to_wrong_kind(
+    wrong_skill: SkillDefinition,
+) -> None:
+    equipment_item = equipment(series_skill_id=wrong_skill.skill_id)
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(
+            equipment_items=(equipment_item,),
+            skill_items=(wrong_skill,),
+        )
+
+    assert "equipment" in str(exc_info.value)
+    assert "series_skill_id" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "wrong_skill",
+    [
+        skill_definition("skill:armor", SkillKind.ARMOR),
+        skill_definition("skill:weapon", SkillKind.WEAPON),
+        series_skill_definition("skill:series"),
+    ],
+)
+def test_catalog_rejects_group_reference_to_wrong_kind(
+    wrong_skill: SkillDefinition,
+) -> None:
+    equipment_item = equipment(group_skill_id=wrong_skill.skill_id)
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(
+            equipment_items=(equipment_item,),
+            skill_items=(wrong_skill,),
+        )
+
+    assert "equipment" in str(exc_info.value)
+    assert "group_skill_id" in str(exc_info.value)
+
+
+def test_catalog_with_memberships_remains_frozen_and_hashable() -> None:
+    series_skill = series_skill_definition()
+    group_skill = group_skill_definition()
+    created = catalog(
+        equipment_items=(
+            equipment(
+                series_skill_id=series_skill.skill_id,
+                group_skill_id=group_skill.skill_id,
+            ),
+        ),
+        skill_items=(series_skill, group_skill),
+    )
+
+    assert hash(created) == hash(
+        catalog(
+            equipment_items=(
+                equipment(
+                    series_skill_id=series_skill.skill_id,
+                    group_skill_id=group_skill.skill_id,
+                ),
+            ),
+            skill_items=(series_skill, group_skill),
+        )
+    )
+    with pytest.raises(FrozenInstanceError):
+        created.equipment = ()
 
 
 def test_catalog_accepts_ordered_skill_definitions() -> None:

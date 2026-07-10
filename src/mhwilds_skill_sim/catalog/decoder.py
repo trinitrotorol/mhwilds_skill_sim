@@ -26,7 +26,16 @@ _DECORATION_DEFINITION_KEYS = frozenset(
     ("decoration_id", "required_slot", "skills"),
 )
 _DECORATION_DEFINITION_KEY_ORDER = ("decoration_id", "required_slot", "skills")
-_EQUIPMENT_DEFINITION_KEYS = frozenset(("equipment_id", "part", "skills", "slots"))
+_EQUIPMENT_DEFINITION_KEYS = frozenset(
+    (
+        "equipment_id",
+        "part",
+        "skills",
+        "slots",
+        "series_skill_id",
+        "group_skill_id",
+    )
+)
 _EQUIPMENT_DEFINITION_KEY_ORDER = ("equipment_id", "part", "skills", "slots")
 _EQUIPMENT_PART_VALUES = ("weapon", "head", "chest", "arms", "waist", "legs", "charm")
 _CATALOG_KEYS = frozenset(("schema_version", "equipment", "decorations", "skills"))
@@ -293,6 +302,8 @@ def decode_equipment_definition(
             part=part,
             skills=skills,
             slots=slots,
+            series_skill_id=value.get("series_skill_id"),
+            group_skill_id=value.get("group_skill_id"),
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc

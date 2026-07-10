@@ -17,7 +17,27 @@ EXPECTED_METADATA_SKILL_IDS = {
     "skill:fixture-series-bonus",
     "skill:fixture-group-bonus",
 }
-EQUIPMENT_KEYS = {"equipment_id", "part", "skills", "slots"}
+SERIES_SKILL_ID = "skill:fixture-series-bonus"
+GROUP_SKILL_ID = "skill:fixture-group-bonus"
+EXPECTED_EQUIPMENT_MEMBERSHIPS = {
+    "fixture:weapon:training-blade": (None, None),
+    "fixture:head:precision-alpha": (SERIES_SKILL_ID, GROUP_SKILL_ID),
+    "fixture:head:tenderizer-beta": (None, None),
+    "fixture:chest:power-mail": (SERIES_SKILL_ID, GROUP_SKILL_ID),
+    "fixture:arms:socket-braces": (SERIES_SKILL_ID, GROUP_SKILL_ID),
+    "fixture:waist:precision-coil": (SERIES_SKILL_ID, None),
+    "fixture:legs:tenderizer-greaves": (None, None),
+    "fixture:charm:power": (None, None),
+    "fixture:charm:precision": (None, None),
+}
+EQUIPMENT_KEYS = {
+    "equipment_id",
+    "part",
+    "skills",
+    "slots",
+    "series_skill_id",
+    "group_skill_id",
+}
 DECORATION_KEYS = {"decoration_id", "required_slot", "skills"}
 SKILL_CONTRIBUTION_KEYS = {"skill_id", "level"}
 SKILL_DEFINITION_KEYS = {"skill_id", "kind", "ranks"}
@@ -142,6 +162,86 @@ def test_equipment_keys_match_contract() -> None:
 
     for equipment in data["equipment"]:
         assert set(equipment) == EQUIPMENT_KEYS
+
+
+def test_equipment_memberships_match_exact_fixture_contract() -> None:
+    data = load_fixture()
+
+    assert {
+        equipment["equipment_id"]: (
+            equipment["series_skill_id"],
+            equipment["group_skill_id"],
+        )
+        for equipment in data["equipment"]
+    } == EXPECTED_EQUIPMENT_MEMBERSHIPS
+
+
+def test_equipment_membership_ids_are_null_or_valid_strings() -> None:
+    data = load_fixture()
+
+    for equipment in data["equipment"]:
+        for field_name in ("series_skill_id", "group_skill_id"):
+            membership_id = equipment[field_name]
+            assert membership_id is None or type(membership_id) is str
+            if membership_id is not None:
+                assert membership_id
+                assert membership_id.strip()
+                assert membership_id == membership_id.strip()
+
+
+def test_equipment_memberships_reference_expected_skill_kinds() -> None:
+    data = load_fixture()
+    skills_by_id = {skill["skill_id"]: skill for skill in data["skills"]}
+
+    for equipment in data["equipment"]:
+        series_skill_id = equipment["series_skill_id"]
+        if series_skill_id is not None:
+            assert series_skill_id in skills_by_id
+            assert skills_by_id[series_skill_id]["kind"] == "set"
+
+        group_skill_id = equipment["group_skill_id"]
+        if group_skill_id is not None:
+            assert group_skill_id in skills_by_id
+            assert skills_by_id[group_skill_id]["kind"] == "group"
+
+
+def test_fixture_has_expected_membership_contributor_counts() -> None:
+    data = load_fixture()
+
+    assert (
+        sum(
+            equipment["series_skill_id"] == SERIES_SKILL_ID
+            for equipment in data["equipment"]
+        )
+        == 4
+    )
+    assert (
+        sum(
+            equipment["group_skill_id"] == GROUP_SKILL_ID
+            for equipment in data["equipment"]
+        )
+        == 3
+    )
+
+
+def test_fixture_head_routes_have_intended_memberships() -> None:
+    data = load_fixture()
+    precision_alpha = equipment_by_id(data, "fixture:head:precision-alpha")
+    tenderizer_beta = equipment_by_id(data, "fixture:head:tenderizer-beta")
+
+    assert precision_alpha["series_skill_id"] == SERIES_SKILL_ID
+    assert precision_alpha["group_skill_id"] == GROUP_SKILL_ID
+    assert tenderizer_beta["series_skill_id"] is None
+    assert tenderizer_beta["group_skill_id"] is None
+
+
+def test_fixture_weapon_and_charms_have_no_memberships() -> None:
+    data = load_fixture()
+
+    for equipment in data["equipment"]:
+        if equipment["part"] in {"weapon", "charm"}:
+            assert equipment["series_skill_id"] is None
+            assert equipment["group_skill_id"] is None
 
 
 def test_decoration_keys_match_contract() -> None:

@@ -54,12 +54,35 @@ def equipment(
     part: EquipmentPart = EquipmentPart.WEAPON,
     skills: tuple[SkillContribution, ...] | None = None,
     slots: tuple[DecorationSlot, ...] | None = None,
+    series_skill_id: str | None = None,
+    group_skill_id: str | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
         part=part,
         skills=skills if skills is not None else (skill(),),
         slots=slots if slots is not None else (weapon_slot(1),),
+        series_skill_id=series_skill_id,
+        group_skill_id=group_skill_id,
+    )
+
+
+def equipment_with_membership_value(
+    *,
+    field_name: str,
+    value: object,
+) -> EquipmentDefinition:
+    memberships: dict[str, object] = {
+        "series_skill_id": None,
+        "group_skill_id": None,
+    }
+    memberships[field_name] = value
+    return EquipmentDefinition(
+        equipment_id="weapon:great-sword:hope-blade",
+        part=EquipmentPart.WEAPON,
+        skills=(skill(),),
+        slots=(weapon_slot(1),),
+        **memberships,  # type: ignore[arg-type]
     )
 
 
@@ -126,6 +149,8 @@ def test_can_create_weapon_equipment_definition_with_skills_and_slots() -> None:
     assert definition.part is EquipmentPart.WEAPON
     assert definition.skills == (skill("skill:attack-boost", 1),)
     assert definition.slots == (weapon_slot(1), weapon_slot(2))
+    assert definition.series_skill_id is None
+    assert definition.group_skill_id is None
 
 
 def test_can_create_armor_equipment_definition_with_skills_and_slots() -> None:
@@ -147,6 +172,63 @@ def test_can_create_equipment_definition_without_skills_or_slots() -> None:
 
     assert definition.skills == ()
     assert definition.slots == ()
+
+
+def test_legacy_four_argument_equipment_construction_defaults_memberships() -> None:
+    definition = EquipmentDefinition(
+        "weapon:great-sword:hope-blade",
+        EquipmentPart.WEAPON,
+        (skill(),),
+        (weapon_slot(),),
+    )
+
+    assert definition.series_skill_id is None
+    assert definition.group_skill_id is None
+
+
+def test_equipment_definition_accepts_series_only_membership() -> None:
+    definition = equipment(series_skill_id="skill:fixture-series-bonus")
+
+    assert definition.series_skill_id == "skill:fixture-series-bonus"
+    assert definition.group_skill_id is None
+    assert definition.skills == (skill(),)
+
+
+def test_equipment_definition_accepts_group_only_membership() -> None:
+    definition = equipment(group_skill_id="skill:fixture-group-bonus")
+
+    assert definition.series_skill_id is None
+    assert definition.group_skill_id == "skill:fixture-group-bonus"
+    assert definition.skills == (skill(),)
+
+
+def test_equipment_definition_accepts_both_memberships() -> None:
+    definition = equipment(
+        series_skill_id="skill:fixture-series-bonus",
+        group_skill_id="skill:fixture-group-bonus",
+    )
+
+    assert definition.series_skill_id == "skill:fixture-series-bonus"
+    assert definition.group_skill_id == "skill:fixture-group-bonus"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "membership_id"),
+    [
+        ("series_skill_id", "Skill:Series_Internal-ID.01"),
+        ("group_skill_id", "Skill:Group_Internal-ID.01"),
+    ],
+)
+def test_equipment_definition_preserves_membership_id_text(
+    field_name: str,
+    membership_id: str,
+) -> None:
+    definition = equipment_with_membership_value(
+        field_name=field_name,
+        value=membership_id,
+    )
+
+    assert getattr(definition, field_name) == membership_id
 
 
 @pytest.mark.parametrize("part", EXPECTED_EQUIPMENT_PARTS)
@@ -204,6 +286,8 @@ def test_equipment_definitions_with_same_values_are_equal() -> None:
         equipment(part=EquipmentPart.HEAD),
         equipment(skills=(skill("skill:critical-eye", 1),)),
         equipment(slots=(weapon_slot(2),)),
+        equipment(series_skill_id="skill:fixture-series-bonus"),
+        equipment(group_skill_id="skill:fixture-group-bonus"),
     ],
 )
 def test_equipment_definitions_with_different_values_are_not_equal(
@@ -216,11 +300,118 @@ def test_equipment_definition_is_hashable() -> None:
     assert hash(equipment()) == hash(equipment())
 
 
+def test_equipment_definition_equality_and_hash_include_memberships() -> None:
+    with_memberships = equipment(
+        series_skill_id="skill:fixture-series-bonus",
+        group_skill_id="skill:fixture-group-bonus",
+    )
+
+    assert with_memberships == equipment(
+        series_skill_id="skill:fixture-series-bonus",
+        group_skill_id="skill:fixture-group-bonus",
+    )
+    assert hash(with_memberships) == hash(
+        equipment(
+            series_skill_id="skill:fixture-series-bonus",
+            group_skill_id="skill:fixture-group-bonus",
+        )
+    )
+    assert len({equipment(), with_memberships}) == 2
+
+
 def test_equipment_definition_fields_cannot_be_reassigned() -> None:
     definition = equipment()
 
     with pytest.raises(FrozenInstanceError):
         definition.equipment_id = "weapon:great-sword:other"
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+def test_equipment_membership_fields_cannot_be_reassigned(field_name: str) -> None:
+    definition = equipment()
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(definition, field_name, "skill:fixture-bonus")
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+def test_equipment_definition_accepts_explicit_none_membership(
+    field_name: str,
+) -> None:
+    definition = equipment_with_membership_value(field_name=field_name, value=None)
+
+    assert getattr(definition, field_name) is None
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+@pytest.mark.parametrize("value", ["", " ", "\t\n"])
+def test_equipment_definition_rejects_empty_or_blank_membership_id(
+    field_name: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        equipment_with_membership_value(field_name=field_name, value=value)
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+@pytest.mark.parametrize(
+    "value",
+    [" skill:fixture-bonus", "\tskill:fixture-bonus"],
+)
+def test_equipment_definition_rejects_leading_whitespace_membership_id(
+    field_name: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        equipment_with_membership_value(field_name=field_name, value=value)
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+@pytest.mark.parametrize(
+    "value",
+    ["skill:fixture-bonus ", "skill:fixture-bonus\n"],
+)
+def test_equipment_definition_rejects_trailing_whitespace_membership_id(
+    field_name: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        equipment_with_membership_value(field_name=field_name, value=value)
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+@pytest.mark.parametrize("value", [True, 1, 1.5, [], object()])
+def test_equipment_definition_rejects_non_string_membership_id(
+    field_name: str,
+    value: object,
+) -> None:
+    with pytest.raises(TypeError, match=field_name):
+        equipment_with_membership_value(field_name=field_name, value=value)
+
+
+@pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])
+def test_equipment_definition_rejects_string_subclass_membership_id(
+    field_name: str,
+) -> None:
+    class MembershipId(str):
+        pass
+
+    with pytest.raises(TypeError, match=field_name):
+        equipment_with_membership_value(
+            field_name=field_name,
+            value=MembershipId("skill:fixture-bonus"),
+        )
+
+
+def test_equipment_definition_does_not_look_up_or_classify_memberships() -> None:
+    definition = equipment(
+        part=EquipmentPart.WEAPON,
+        series_skill_id="skill:not-in-a-catalog",
+        group_skill_id="skill:not-in-a-catalog",
+    )
+
+    assert definition.series_skill_id == "skill:not-in-a-catalog"
+    assert definition.group_skill_id == "skill:not-in-a-catalog"
 
 
 @pytest.mark.parametrize("equipment_id", ["", " ", "\t\n"])
