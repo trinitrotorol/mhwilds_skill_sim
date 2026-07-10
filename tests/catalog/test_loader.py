@@ -17,7 +17,7 @@ from mhwilds_skill_sim.catalog.decoder import (
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
-from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.skill import SkillContribution, SkillKind
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +59,7 @@ def test_load_catalog_reads_tiny_catalog_from_path() -> None:
     assert catalog.schema_version == 1
     assert len(catalog.equipment) == 9
     assert len(catalog.decorations) == 5
+    assert len(catalog.skills) == 6
 
 
 def test_load_catalog_reads_tiny_catalog_from_str() -> None:
@@ -68,6 +69,7 @@ def test_load_catalog_reads_tiny_catalog_from_str() -> None:
     assert catalog.schema_version == 1
     assert len(catalog.equipment) == 9
     assert len(catalog.decorations) == 5
+    assert len(catalog.skills) == 6
 
 
 def test_load_catalog_preserves_tiny_catalog_order() -> None:
@@ -91,6 +93,38 @@ def test_load_catalog_preserves_tiny_catalog_order() -> None:
         "fixture:decoration:armor-tenderizer-2",
         "fixture:decoration:armor-combination-2",
     ]
+
+
+def test_load_catalog_reads_all_skill_kinds_in_expected_order() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    assert [skill.skill_id for skill in catalog.skills] == [
+        "skill:attack-boost",
+        "skill:critical-eye",
+        "skill:weakness-exploit",
+        "skill:fixture-weapon-technique",
+        "skill:fixture-series-bonus",
+        "skill:fixture-group-bonus",
+    ]
+    assert {skill.kind for skill in catalog.skills} == {
+        SkillKind.ARMOR,
+        SkillKind.WEAPON,
+        SkillKind.SERIES,
+        SkillKind.GROUP,
+    }
+
+
+def test_load_catalog_reads_series_and_group_rank_thresholds() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+    skills_by_id = {skill.skill_id: skill for skill in catalog.skills}
+
+    assert [
+        rank.required_pieces
+        for rank in skills_by_id["skill:fixture-series-bonus"].ranks
+    ] == [2, 4]
+    assert [
+        rank.required_pieces for rank in skills_by_id["skill:fixture-group-bonus"].ranks
+    ] == [3]
 
 
 def test_load_catalog_is_keyword_only() -> None:

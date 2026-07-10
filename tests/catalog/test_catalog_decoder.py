@@ -15,11 +15,18 @@ from mhwilds_skill_sim.catalog.decoder import (
     decode_decoration_slot,
     decode_equipment_definition,
     decode_skill_contribution,
+    decode_skill_definition,
+    decode_skill_rank_definition,
 )
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
-from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.skill import (
+    SkillContribution,
+    SkillDefinition,
+    SkillKind,
+    SkillRankDefinition,
+)
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -62,6 +69,25 @@ def decoration_value(
     }
 
 
+def skill_rank_value(
+    level: object = 1,
+    required_pieces: object = None,
+) -> dict[str, object]:
+    return {"level": level, "required_pieces": required_pieces}
+
+
+def skill_definition_value(
+    skill_id: object = "skill:attack-boost",
+    kind: object = "armor",
+    ranks: object = None,
+) -> dict[str, object]:
+    return {
+        "skill_id": skill_id,
+        "kind": kind,
+        "ranks": [skill_rank_value()] if ranks is None else ranks,
+    }
+
+
 def alternate_decoration_value(
     decoration_id: str = "fixture:decoration:armor-power-1",
 ) -> dict[str, object]:
@@ -86,6 +112,10 @@ def equipment_generator() -> Iterator[dict[str, object]]:
 
 def decorations_generator() -> Iterator[dict[str, object]]:
     yield decoration_value()
+
+
+def skills_generator() -> Iterator[dict[str, object]]:
+    yield skill_definition_value()
 
 
 def assert_nested_error_not_wrapped(error: CatalogDecodeError) -> None:
@@ -530,3 +560,427 @@ def test_catalog_decode_error_still_imports_directly() -> None:
     error = CatalogDecodeError(path="$.catalog", detail="invalid object")
 
     assert str(error) == "$.catalog: invalid object"
+
+
+@pytest.mark.parametrize(
+    ("kind_value", "expected_kind", "ranks"),
+    [
+        ("armor", SkillKind.ARMOR, [skill_rank_value(1), skill_rank_value(2)]),
+        ("weapon", SkillKind.WEAPON, [skill_rank_value(1)]),
+        (
+            "set",
+            SkillKind.SERIES,
+            [skill_rank_value(1, 2), skill_rank_value(2, 4)],
+        ),
+        ("group", SkillKind.GROUP, [skill_rank_value(1, 3)]),
+    ],
+)
+def test_decode_skill_definition_converts_each_skill_kind(
+    kind_value: str,
+    expected_kind: SkillKind,
+    ranks: list[dict[str, object]],
+) -> None:
+    decoded = decode_skill_definition(
+        value=skill_definition_value(kind=kind_value, ranks=ranks),
+    )
+
+    assert decoded == SkillDefinition(
+        skill_id="skill:attack-boost",
+        kind=expected_kind,
+        ranks=tuple(
+            SkillRankDefinition(
+                level=rank_value["level"],  # type: ignore[arg-type]
+                required_pieces=rank_value["required_pieces"],  # type: ignore[arg-type]
+            )
+            for rank_value in ranks
+        ),
+    )
+
+
+def test_decode_skill_rank_definition_converts_normal_rank() -> None:
+    decoded = decode_skill_rank_definition(
+        value={"level": 2, "required_pieces": None},
+    )
+
+    assert decoded == SkillRankDefinition(level=2, required_pieces=None)
+
+
+def test_decode_skill_rank_definition_converts_piece_threshold_rank() -> None:
+    decoded = decode_skill_rank_definition(
+        value={"level": 2, "required_pieces": 4},
+    )
+
+    assert decoded == SkillRankDefinition(level=2, required_pieces=4)
+
+
+@pytest.mark.parametrize("value", [None, "rank", [], ()])
+def test_decode_skill_rank_definition_rejects_non_dict(value: object) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_rank_definition(value=value, path="$.rank")
+
+    assert exc_info.value.path == "$.rank"
+    assert "object" in exc_info.value.detail
+
+
+def test_decode_skill_rank_definition_rejects_dict_subclass() -> None:
+    class RankDict(dict[str, object]):
+        pass
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_rank_definition(
+            value=RankDict(skill_rank_value()),
+            path="$.rank",
+        )
+
+    assert exc_info.value.path == "$.rank"
+    assert "object" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_fragments"),
+    [
+        ({"required_pieces": None}, ("level",)),
+        ({"level": 1}, ("required_pieces",)),
+        (
+            {"level": 1, "required_pieces": None, "extra": True},
+            ("extra",),
+        ),
+        ({}, ("level", "required_pieces")),
+    ],
+)
+def test_decode_skill_rank_definition_rejects_invalid_shape(
+    value: dict[object, object],
+    expected_fragments: tuple[str, ...],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_rank_definition(value=value, path="$.rank")
+
+    assert exc_info.value.path == "$.rank"
+    for fragment in expected_fragments:
+        assert fragment in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_field", "expected_cause"),
+    [
+        (skill_rank_value(level=True), "level", TypeError),
+        (skill_rank_value(level=0), "level", ValueError),
+        (skill_rank_value(required_pieces=True), "required_pieces", TypeError),
+        (skill_rank_value(required_pieces=0), "required_pieces", ValueError),
+    ],
+)
+def test_decode_skill_rank_definition_wraps_domain_errors(
+    value: dict[str, object],
+    expected_field: str,
+    expected_cause: type[Exception],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_rank_definition(value=value, path="$.rank")
+
+    assert exc_info.value.path == "$.rank"
+    assert expected_field in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+@pytest.mark.parametrize("value", [None, "skill", [], ()])
+def test_decode_skill_definition_rejects_non_dict(value: object) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(value=value, path="$.skill")
+
+    assert exc_info.value.path == "$.skill"
+    assert "object" in exc_info.value.detail
+
+
+def test_decode_skill_definition_rejects_dict_subclass() -> None:
+    class SkillDict(dict[str, object]):
+        pass
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(
+            value=SkillDict(skill_definition_value()),
+            path="$.skill",
+        )
+
+    assert exc_info.value.path == "$.skill"
+    assert "object" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_fragments"),
+    [
+        ({"kind": "armor", "ranks": [skill_rank_value()]}, ("skill_id",)),
+        (
+            {"skill_id": "skill:test", "ranks": [skill_rank_value()]},
+            ("kind",),
+        ),
+        ({"skill_id": "skill:test", "kind": "armor"}, ("ranks",)),
+        (
+            dict(skill_definition_value(), extra=True),
+            ("extra",),
+        ),
+        ({}, ("skill_id", "kind", "ranks")),
+    ],
+)
+def test_decode_skill_definition_rejects_invalid_shape(
+    value: dict[object, object],
+    expected_fragments: tuple[str, ...],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(value=value, path="$.skill")
+
+    assert exc_info.value.path == "$.skill"
+    for fragment in expected_fragments:
+        assert fragment in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "ranks",
+    [
+        (skill_rank_value(),),
+        {"level": 1, "required_pieces": None},
+        {("level", 1)},
+        skills_generator(),
+        None,
+    ],
+)
+def test_decode_skill_definition_rejects_non_list_ranks(ranks: object) -> None:
+    value = skill_definition_value()
+    value["ranks"] = ranks
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(
+            value=value,
+            path="$.skill",
+        )
+
+    assert exc_info.value.path == "$.skill.ranks"
+    assert "ranks" in exc_info.value.detail
+
+
+def test_decode_skill_definition_rejects_ranks_list_subclass() -> None:
+    class RankList(list[object]):
+        pass
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(
+            value=skill_definition_value(ranks=RankList([skill_rank_value()])),
+            path="$.skill",
+        )
+
+    assert exc_info.value.path == "$.skill.ranks"
+    assert "ranks" in exc_info.value.detail
+
+
+def test_decode_skill_definition_rejects_empty_ranks() -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(
+            value=skill_definition_value(ranks=[]),
+            path="$.skill",
+        )
+
+    assert exc_info.value.path == "$.skill.ranks"
+    assert "empty" in exc_info.value.detail
+
+
+def test_decode_skill_definition_preserves_nested_rank_error_path() -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(
+            value=skill_definition_value(
+                kind="set",
+                ranks=[skill_rank_value(1, 2), skill_rank_value(0, 4)],
+            ),
+            path="$.catalog.skills[1]",
+        )
+
+    assert exc_info.value.path == "$.catalog.skills[1].ranks[1]"
+    assert "level" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_cause"),
+    [
+        ("series", ValueError),
+        ("normal", ValueError),
+        ("Armor", ValueError),
+        ("", ValueError),
+        (1, TypeError),
+        (True, TypeError),
+        (None, TypeError),
+    ],
+)
+def test_decode_skill_definition_rejects_invalid_kind_values(
+    kind: object,
+    expected_cause: type[Exception],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(
+            value=skill_definition_value(kind=kind),
+            path="$.skill",
+        )
+
+    assert exc_info.value.path == "$.skill"
+    assert "kind" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_fragment"),
+    [
+        (skill_definition_value(skill_id=""), "skill_id"),
+        (
+            skill_definition_value(
+                kind="armor",
+                ranks=[skill_rank_value(1, 2)],
+            ),
+            "ranks",
+        ),
+        (
+            skill_definition_value(
+                kind="set",
+                ranks=[skill_rank_value(1, None)],
+            ),
+            "ranks",
+        ),
+        (
+            skill_definition_value(
+                kind="group",
+                ranks=[skill_rank_value(1, 3), skill_rank_value(2, 3)],
+            ),
+            "ranks",
+        ),
+        (
+            skill_definition_value(
+                kind="set",
+                ranks=[skill_rank_value(1, 2), skill_rank_value(3, 4)],
+            ),
+            "ranks",
+        ),
+    ],
+)
+def test_decode_skill_definition_wraps_domain_cross_invariant_errors(
+    value: dict[str, object],
+    expected_fragment: str,
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(value=value, path="$.skill")
+
+    assert exc_info.value.path == "$.skill"
+    assert expected_fragment in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_skill_metadata_decoders_are_keyword_only() -> None:
+    for decoder in (decode_skill_rank_definition, decode_skill_definition):
+        signature = inspect.signature(decoder)
+
+        assert signature.parameters["value"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters["path"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_decode_catalog_without_skills_keeps_backward_compatible_empty_tuple() -> None:
+    decoded = decode_catalog(value=catalog_value())
+
+    assert decoded.skills == ()
+
+
+def test_decode_catalog_with_empty_skills_list_returns_empty_tuple() -> None:
+    value = catalog_value()
+    value["skills"] = []
+
+    decoded = decode_catalog(value=value)
+
+    assert decoded.skills == ()
+
+
+def test_decode_catalog_with_skills_preserves_order() -> None:
+    value = catalog_value()
+    value["skills"] = [
+        skill_definition_value("skill:attack-boost", "armor"),
+        skill_definition_value(
+            "skill:series-bonus",
+            "set",
+            [skill_rank_value(1, 2), skill_rank_value(2, 4)],
+        ),
+        skill_definition_value(
+            "skill:group-bonus",
+            "group",
+            [skill_rank_value(1, 3)],
+        ),
+    ]
+
+    decoded = decode_catalog(value=value)
+
+    assert [skill.skill_id for skill in decoded.skills] == [
+        "skill:attack-boost",
+        "skill:series-bonus",
+        "skill:group-bonus",
+    ]
+
+
+@pytest.mark.parametrize(
+    "skills",
+    [
+        (skill_definition_value(),),
+        {"skill_id": "skill:attack-boost"},
+        {("skill:attack-boost", "armor")},
+        skills_generator(),
+        None,
+    ],
+)
+def test_decode_catalog_rejects_non_list_skills(skills: object) -> None:
+    value = catalog_value()
+    value["skills"] = skills
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog.skills"
+    assert "skills" in exc_info.value.detail
+
+
+def test_decode_catalog_rejects_skills_list_subclass() -> None:
+    class SkillList(list[object]):
+        pass
+
+    value = catalog_value()
+    value["skills"] = SkillList([skill_definition_value()])
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog.skills"
+    assert "skills" in exc_info.value.detail
+
+
+def test_decode_catalog_preserves_nested_skill_error_path() -> None:
+    value = catalog_value()
+    value["skills"] = [
+        skill_definition_value(),
+        skill_definition_value(
+            skill_id="skill:series-bonus",
+            kind="set",
+            ranks=[skill_rank_value(1, 2), skill_rank_value(0, 4)],
+        ),
+    ]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog.skills[1].ranks[1]"
+    assert_nested_error_not_wrapped(exc_info.value)
+
+
+def test_decode_catalog_wraps_duplicate_skill_id_error_at_root() -> None:
+    value = catalog_value()
+    value["skills"] = [
+        skill_definition_value(),
+        skill_definition_value(kind="weapon"),
+    ]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert "skills" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)

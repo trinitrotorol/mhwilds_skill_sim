@@ -11,9 +11,17 @@ EXPECTED_SKILL_IDS = {
     "skill:critical-eye",
     "skill:weakness-exploit",
 }
+EXPECTED_METADATA_SKILL_IDS = {
+    *EXPECTED_SKILL_IDS,
+    "skill:fixture-weapon-technique",
+    "skill:fixture-series-bonus",
+    "skill:fixture-group-bonus",
+}
 EQUIPMENT_KEYS = {"equipment_id", "part", "skills", "slots"}
 DECORATION_KEYS = {"decoration_id", "required_slot", "skills"}
-SKILL_KEYS = {"skill_id", "level"}
+SKILL_CONTRIBUTION_KEYS = {"skill_id", "level"}
+SKILL_DEFINITION_KEYS = {"skill_id", "kind", "ranks"}
+SKILL_RANK_KEYS = {"level", "required_pieces"}
 SLOT_KEYS = {"kind", "level"}
 
 
@@ -60,7 +68,7 @@ def test_fixture_loads_as_utf8_json() -> None:
 def test_top_level_keys_and_schema_version() -> None:
     data = load_fixture()
 
-    assert list(data) == ["schema_version", "equipment", "decorations"]
+    assert list(data) == ["schema_version", "skills", "equipment", "decorations"]
     assert type(data["schema_version"]) is int
     assert data["schema_version"] == 1
 
@@ -68,8 +76,28 @@ def test_top_level_keys_and_schema_version() -> None:
 def test_catalog_counts() -> None:
     data = load_fixture()
 
+    assert len(data["skills"]) == 6
     assert len(data["equipment"]) == 9
     assert len(data["decorations"]) == 5
+
+
+def test_skill_metadata_ids_are_unique_and_match_contract() -> None:
+    data = load_fixture()
+    skill_ids = [skill["skill_id"] for skill in data["skills"]]
+
+    assert len(skill_ids) == len(set(skill_ids))
+    assert set(skill_ids) == EXPECTED_METADATA_SKILL_IDS
+
+
+def test_skill_metadata_covers_all_kinds() -> None:
+    data = load_fixture()
+
+    assert {skill["kind"] for skill in data["skills"]} == {
+        "armor",
+        "weapon",
+        "set",
+        "group",
+    }
 
 
 def test_equipment_ids_are_unique() -> None:
@@ -127,7 +155,45 @@ def test_skill_keys_match_contract() -> None:
     data = load_fixture()
 
     for skill in all_skill_entries(data):
-        assert set(skill) == SKILL_KEYS
+        assert set(skill) == SKILL_CONTRIBUTION_KEYS
+
+
+def test_skill_metadata_keys_match_contract() -> None:
+    data = load_fixture()
+
+    for skill in data["skills"]:
+        assert set(skill) == SKILL_DEFINITION_KEYS
+        for rank in skill["ranks"]:
+            assert set(rank) == SKILL_RANK_KEYS
+
+
+def test_skill_metadata_rank_values_match_kind_contract() -> None:
+    data = load_fixture()
+
+    for skill in data["skills"]:
+        assert skill["ranks"]
+        for rank in skill["ranks"]:
+            assert type(rank["level"]) is int
+            assert rank["level"] > 0
+
+            required_pieces = rank["required_pieces"]
+            assert required_pieces is None or type(required_pieces) is int
+            if required_pieces is not None:
+                assert required_pieces > 0
+
+            if skill["kind"] in {"armor", "weapon"}:
+                assert required_pieces is None
+            else:
+                assert skill["kind"] in {"set", "group"}
+                assert type(required_pieces) is int
+                assert required_pieces > 0
+
+
+def test_every_referenced_skill_id_has_metadata() -> None:
+    data = load_fixture()
+    metadata_ids = {skill["skill_id"] for skill in data["skills"]}
+
+    assert {skill["skill_id"] for skill in all_skill_entries(data)} <= metadata_ids
 
 
 def test_slot_keys_match_contract() -> None:

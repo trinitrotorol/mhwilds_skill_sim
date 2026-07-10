@@ -1,5 +1,95 @@
 {
   "schema_version": 1,
+  "skills": [
+    {
+      "skill_id": "skill:attack-boost",
+      "kind": "armor",
+      "ranks": [
+        {
+          "level": 1,
+          "required_pieces": null
+        },
+        {
+          "level": 2,
+          "required_pieces": null
+        },
+        {
+          "level": 3,
+          "required_pieces": null
+        }
+      ]
+    },
+    {
+      "skill_id": "skill:critical-eye",
+      "kind": "armor",
+      "ranks": [
+        {
+          "level": 1,
+          "required_pieces": null
+        },
+        {
+          "level": 2,
+          "required_pieces": null
+        },
+        {
+          "level": 3,
+          "required_pieces": null
+        }
+      ]
+    },
+    {
+      "skill_id": "skill:weakness-exploit",
+      "kind": "armor",
+      "ranks": [
+        {
+          "level": 1,
+          "required_pieces": null
+        },
+        {
+          "level": 2,
+          "required_pieces": null
+        },
+        {
+          "level": 3,
+          "required_pieces": null
+        }
+      ]
+    },
+    {
+      "skill_id": "skill:fixture-weapon-technique",
+      "kind": "weapon",
+      "ranks": [
+        {
+          "level": 1,
+          "required_pieces": null
+        }
+      ]
+    },
+    {
+      "skill_id": "skill:fixture-series-bonus",
+      "kind": "set",
+      "ranks": [
+        {
+          "level": 1,
+          "required_pieces": 2
+        },
+        {
+          "level": 2,
+          "required_pieces": 4
+        }
+      ]
+    },
+    {
+      "skill_id": "skill:fixture-group-bonus",
+      "kind": "group",
+      "ranks": [
+        {
+          "level": 1,
+          "required_pieces": 3
+        }
+      ]
+    }
+  ],
   "equipment": [
     {
       "equipment_id": "fixture:weapon:training-blade",

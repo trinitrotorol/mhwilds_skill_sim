@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition
+from mhwilds_skill_sim.domain.skill import SkillDefinition
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +14,7 @@ class Catalog:
     schema_version: int
     equipment: tuple[EquipmentDefinition, ...]
     decorations: tuple[DecorationDefinition, ...]
+    skills: tuple[SkillDefinition, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.schema_version) is not int:
@@ -46,3 +48,16 @@ class Catalog:
                 raise ValueError("decorations must not contain duplicate decoration_id")
 
             seen_decoration_ids.add(decoration.decoration_id)
+
+        if type(self.skills) is not tuple:
+            raise TypeError("skills must be tuple")
+
+        seen_skill_ids: set[str] = set()
+        for skill in self.skills:
+            if not isinstance(skill, SkillDefinition):
+                raise TypeError("skills must contain only SkillDefinition")
+
+            if skill.skill_id in seen_skill_ids:
+                raise ValueError("skills must not contain duplicate skill_id")
+
+            seen_skill_ids.add(skill.skill_id)

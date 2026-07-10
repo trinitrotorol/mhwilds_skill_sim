@@ -6,11 +6,20 @@ from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
 from mhwilds_skill_sim.catalog.model import Catalog
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
-from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.skill import (
+    SkillContribution,
+    SkillDefinition,
+    SkillKind,
+    SkillRankDefinition,
+)
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
 _SKILL_CONTRIBUTION_KEYS = frozenset(("skill_id", "level"))
 _SKILL_CONTRIBUTION_KEY_ORDER = ("skill_id", "level")
+_SKILL_RANK_DEFINITION_KEYS = frozenset(("level", "required_pieces"))
+_SKILL_RANK_DEFINITION_KEY_ORDER = ("level", "required_pieces")
+_SKILL_DEFINITION_KEYS = frozenset(("skill_id", "kind", "ranks"))
+_SKILL_DEFINITION_KEY_ORDER = ("skill_id", "kind", "ranks")
 _DECORATION_SLOT_KEYS = frozenset(("kind", "level"))
 _DECORATION_SLOT_KEY_ORDER = ("kind", "level")
 _DECORATION_DEFINITION_KEYS = frozenset(
@@ -20,7 +29,7 @@ _DECORATION_DEFINITION_KEY_ORDER = ("decoration_id", "required_slot", "skills")
 _EQUIPMENT_DEFINITION_KEYS = frozenset(("equipment_id", "part", "skills", "slots"))
 _EQUIPMENT_DEFINITION_KEY_ORDER = ("equipment_id", "part", "skills", "slots")
 _EQUIPMENT_PART_VALUES = ("weapon", "head", "chest", "arms", "waist", "legs", "charm")
-_CATALOG_KEYS = frozenset(("schema_version", "equipment", "decorations"))
+_CATALOG_KEYS = frozenset(("schema_version", "equipment", "decorations", "skills"))
 _CATALOG_KEY_ORDER = ("schema_version", "equipment", "decorations")
 
 
@@ -53,6 +62,96 @@ def decode_skill_contribution(
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc
+
+
+def decode_skill_rank_definition(
+    *,
+    value: object,
+    path: str = "$",
+) -> SkillRankDefinition:
+    if type(value) is not dict:
+        raise CatalogDecodeError(path=path, detail="expected skill rank object")
+
+    missing_keys = [key for key in _SKILL_RANK_DEFINITION_KEY_ORDER if key not in value]
+    extra_keys = [key for key in value if key not in _SKILL_RANK_DEFINITION_KEYS]
+
+    if missing_keys or extra_keys:
+        detail_parts: list[str] = []
+        if missing_keys:
+            detail_parts.append(f"missing keys: {', '.join(missing_keys)}")
+        if extra_keys:
+            detail_parts.append(
+                "unexpected keys: "
+                + ", ".join(_format_key(key) for key in _sort_keys(extra_keys)),
+            )
+        raise CatalogDecodeError(path=path, detail="; ".join(detail_parts))
+
+    try:
+        return SkillRankDefinition(
+            level=value["level"],
+            required_pieces=value["required_pieces"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(path=path, detail=str(exc)) from exc
+
+
+def decode_skill_definition(
+    *,
+    value: object,
+    path: str = "$",
+) -> SkillDefinition:
+    if type(value) is not dict:
+        raise CatalogDecodeError(path=path, detail="expected skill definition object")
+
+    missing_keys = [key for key in _SKILL_DEFINITION_KEY_ORDER if key not in value]
+    extra_keys = [key for key in value if key not in _SKILL_DEFINITION_KEYS]
+
+    if missing_keys or extra_keys:
+        detail_parts: list[str] = []
+        if missing_keys:
+            detail_parts.append(f"missing keys: {', '.join(missing_keys)}")
+        if extra_keys:
+            detail_parts.append(
+                "unexpected keys: "
+                + ", ".join(_format_key(key) for key in _sort_keys(extra_keys)),
+            )
+        raise CatalogDecodeError(path=path, detail="; ".join(detail_parts))
+
+    if type(value["ranks"]) is not list:
+        raise CatalogDecodeError(path=f"{path}.ranks", detail="ranks must be list")
+
+    if not value["ranks"]:
+        raise CatalogDecodeError(path=f"{path}.ranks", detail="ranks must not be empty")
+
+    ranks = tuple(
+        decode_skill_rank_definition(value=rank, path=f"{path}.ranks[{index}]")
+        for index, rank in enumerate(value["ranks"])
+    )
+
+    try:
+        return SkillDefinition(
+            skill_id=value["skill_id"],
+            kind=_decode_skill_kind(value["kind"]),
+            ranks=ranks,
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(path=path, detail=str(exc)) from exc
+
+
+def _decode_skill_kind(value: object) -> SkillKind:
+    if type(value) is not str:
+        raise TypeError("kind must be str")
+
+    if value == SkillKind.ARMOR.value:
+        return SkillKind.ARMOR
+    if value == SkillKind.WEAPON.value:
+        return SkillKind.WEAPON
+    if value == SkillKind.SERIES.value:
+        return SkillKind.SERIES
+    if value == SkillKind.GROUP.value:
+        return SkillKind.GROUP
+
+    raise ValueError("kind must be one of: armor, weapon, set, group")
 
 
 def decode_decoration_slot(
@@ -287,12 +386,21 @@ def decode_catalog(
         value=value["decorations"],
         path=f"{path}.decorations",
     )
+    skills = (
+        _decode_catalog_skills(
+            value=value["skills"],
+            path=f"{path}.skills",
+        )
+        if "skills" in value
+        else ()
+    )
 
     try:
         return Catalog(
             schema_version=schema_version,
             equipment=equipment,
             decorations=decorations,
+            skills=skills,
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc
@@ -333,6 +441,20 @@ def _decode_catalog_decorations(
     return tuple(
         decode_decoration_definition(value=decoration, path=f"{path}[{index}]")
         for index, decoration in enumerate(value)
+    )
+
+
+def _decode_catalog_skills(
+    *,
+    value: object,
+    path: str,
+) -> tuple[SkillDefinition, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(path=path, detail="skills must be list")
+
+    return tuple(
+        decode_skill_definition(value=skill, path=f"{path}[{index}]")
+        for index, skill in enumerate(value)
     )
 
 

@@ -8,7 +8,12 @@ import pytest
 from mhwilds_skill_sim.catalog import Catalog
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
-from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.skill import (
+    SkillContribution,
+    SkillDefinition,
+    SkillKind,
+    SkillRankDefinition,
+)
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
 
@@ -48,10 +53,19 @@ def decoration(
     )
 
 
+def skill_definition(
+    skill_id: str = "skill:attack-boost",
+    kind: SkillKind = SkillKind.ARMOR,
+    ranks: tuple[SkillRankDefinition, ...] = (SkillRankDefinition(1, None),),
+) -> SkillDefinition:
+    return SkillDefinition(skill_id=skill_id, kind=kind, ranks=ranks)
+
+
 def catalog(
     schema_version: int = 1,
     equipment_items: tuple[EquipmentDefinition, ...] | None = None,
     decoration_items: tuple[DecorationDefinition, ...] | None = None,
+    skill_items: tuple[SkillDefinition, ...] | None = None,
 ) -> Catalog:
     return Catalog(
         schema_version=schema_version,
@@ -59,6 +73,7 @@ def catalog(
         decorations=(
             decoration_items if decoration_items is not None else (decoration(),)
         ),
+        skills=skill_items if skill_items is not None else (),
     )
 
 
@@ -68,6 +83,7 @@ def test_can_create_empty_catalog() -> None:
     assert created.schema_version == 1
     assert created.equipment == ()
     assert created.decorations == ()
+    assert created.skills == ()
 
 
 def test_can_create_catalog_with_equipment_and_decorations() -> None:
@@ -82,6 +98,23 @@ def test_can_create_catalog_with_equipment_and_decorations() -> None:
 
     assert created.equipment == equipment_items
     assert created.decorations == decoration_items
+    assert created.skills == ()
+
+
+def test_catalog_accepts_ordered_skill_definitions() -> None:
+    skill_items = (
+        skill_definition("skill:attack-boost"),
+        skill_definition("skill:critical-eye"),
+        skill_definition(
+            "skill:series-bonus",
+            SkillKind.SERIES,
+            (SkillRankDefinition(1, 2), SkillRankDefinition(2, 4)),
+        ),
+    )
+
+    created = catalog(skill_items=skill_items)
+
+    assert created.skills == skill_items
 
 
 def test_catalog_preserves_schema_version_one() -> None:
@@ -130,11 +163,27 @@ def test_catalog_is_hashable() -> None:
     assert hash(catalog()) == hash(catalog())
 
 
+def test_catalog_with_skills_is_hashable_and_compares_by_value() -> None:
+    skill_items = (skill_definition(),)
+
+    assert catalog(skill_items=skill_items) == catalog(skill_items=skill_items)
+    assert hash(catalog(skill_items=skill_items)) == hash(
+        catalog(skill_items=skill_items)
+    )
+
+
 def test_catalog_fields_cannot_be_reassigned() -> None:
     created = catalog()
 
     with pytest.raises(FrozenInstanceError):
         created.schema_version = 2
+
+
+def test_catalog_skills_cannot_be_reassigned() -> None:
+    created = catalog(skill_items=(skill_definition(),))
+
+    with pytest.raises(FrozenInstanceError):
+        created.skills = ()
 
 
 @pytest.mark.parametrize("schema_version", [0, -1])
@@ -292,6 +341,70 @@ def test_catalog_accepts_multiple_different_decoration_ids() -> None:
     )
 
     assert catalog(decoration_items=decoration_items).decorations == decoration_items
+
+
+def skill_definition_generator() -> Iterator[SkillDefinition]:
+    yield skill_definition()
+
+
+@pytest.mark.parametrize(
+    "skill_items",
+    [
+        [skill_definition()],
+        {skill_definition()},
+        skill_definition_generator(),
+    ],
+)
+def test_catalog_rejects_non_tuple_skills(skill_items: object) -> None:
+    with pytest.raises(TypeError, match="skills"):
+        Catalog(
+            schema_version=1,
+            equipment=(),
+            decorations=(),
+            skills=skill_items,  # type: ignore[arg-type]
+        )
+
+
+def test_catalog_rejects_skill_tuple_subclass() -> None:
+    class SkillTuple(tuple[SkillDefinition, ...]):
+        pass
+
+    with pytest.raises(TypeError, match="skills"):
+        Catalog(
+            schema_version=1,
+            equipment=(),
+            decorations=(),
+            skills=SkillTuple((skill_definition(),)),
+        )
+
+
+@pytest.mark.parametrize("invalid_skill", ["skill", None, 1])
+def test_catalog_rejects_invalid_skill_elements(invalid_skill: object) -> None:
+    with pytest.raises(TypeError, match="skills"):
+        Catalog(
+            schema_version=1,
+            equipment=(),
+            decorations=(),
+            skills=(invalid_skill,),  # type: ignore[arg-type]
+        )
+
+
+def test_catalog_accepts_empty_skills_tuple() -> None:
+    assert catalog(skill_items=()).skills == ()
+
+
+def test_catalog_rejects_duplicate_skill_ids() -> None:
+    skill_items = (
+        skill_definition("skill:attack-boost"),
+        skill_definition(
+            "skill:attack-boost",
+            SkillKind.WEAPON,
+            (SkillRankDefinition(1, None),),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="skills"):
+        catalog(skill_items=skill_items)
 
 
 def test_catalog_allows_same_id_across_equipment_and_decoration_namespaces() -> None:
