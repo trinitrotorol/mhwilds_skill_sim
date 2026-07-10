@@ -360,6 +360,40 @@ def test_limit_applies_after_requirement_filtering() -> None:
     assert result.truncated is (len(all_candidates) > 2)
 
 
+@pytest.mark.parametrize(
+    "requirements",
+    [
+        (requirement("skill:fixture-series-bonus", 2),),
+        (requirement("skill:fixture-group-bonus", 1),),
+    ],
+)
+def test_bonus_requirements_are_filtered_before_limiting(
+    requirements: tuple[SkillRequirement, ...],
+) -> None:
+    catalog = tiny_catalog()
+    all_matching = search_catalog_build_candidates_by_skill_requirements(
+        catalog=catalog,
+        requirements=requirements,
+    )
+
+    result = limited_search(
+        catalog=catalog,
+        requirements=requirements,
+        max_results=2,
+    )
+
+    assert all_matching
+    assert result.candidates == all_matching[:2]
+    assert result.total_count == len(all_matching)
+    assert result.truncated is (len(all_matching) > 2)
+    required_skill = requirements[0]
+    assert all(
+        dict(candidate.skill_levels)[required_skill.skill_id]
+        >= required_skill.min_level
+        for candidate in result.candidates
+    )
+
+
 def test_returns_build_candidate_search_result() -> None:
     result = limited_search(catalog=tiny_catalog(), requirements=(), max_results=1)
 

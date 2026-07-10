@@ -8,7 +8,12 @@ import pytest
 
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
-from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.skill import (
+    SkillContribution,
+    SkillDefinition,
+    SkillKind,
+    SkillRankDefinition,
+)
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 from mhwilds_skill_sim.solver import (
     SkillRequirement,
@@ -52,12 +57,16 @@ def equipment_definition(
     *,
     skills: tuple[SkillContribution, ...] = (),
     slots: tuple[DecorationSlot, ...] = (),
+    series_skill_id: str | None = None,
+    group_skill_id: str | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
         part=part,
         skills=skills,
         slots=slots,
+        series_skill_id=series_skill_id,
+        group_skill_id=group_skill_id,
     )
 
 
@@ -74,6 +83,10 @@ def complete_equipment(
     legs_skills: tuple[SkillContribution, ...] = (),
     charm_skills: tuple[SkillContribution, ...] = (),
     weapon_slots: tuple[DecorationSlot, ...] = (),
+    series_parts: tuple[EquipmentPart, ...] = (),
+    group_parts: tuple[EquipmentPart, ...] = (),
+    series_skill_id: str = "skill:series-bonus",
+    group_skill_id: str = "skill:group-bonus",
 ) -> tuple[EquipmentDefinition, ...]:
     return (
         equipment_definition(
@@ -81,22 +94,109 @@ def complete_equipment(
             weapon_id,
             skills=weapon_skills,
             slots=weapon_slots,
+            series_skill_id=(
+                series_skill_id if EquipmentPart.WEAPON in series_parts else None
+            ),
+            group_skill_id=(
+                group_skill_id if EquipmentPart.WEAPON in group_parts else None
+            ),
         ),
-        equipment_definition(EquipmentPart.HEAD, head_id, skills=head_skills),
+        equipment_definition(
+            EquipmentPart.HEAD,
+            head_id,
+            skills=head_skills,
+            series_skill_id=(
+                series_skill_id if EquipmentPart.HEAD in series_parts else None
+            ),
+            group_skill_id=(
+                group_skill_id if EquipmentPart.HEAD in group_parts else None
+            ),
+        ),
         equipment_definition(
             EquipmentPart.CHEST,
             "equipment:chest",
             skills=chest_skills,
+            series_skill_id=(
+                series_skill_id if EquipmentPart.CHEST in series_parts else None
+            ),
+            group_skill_id=(
+                group_skill_id if EquipmentPart.CHEST in group_parts else None
+            ),
         ),
-        equipment_definition(EquipmentPart.ARMS, "equipment:arms", skills=arms_skills),
+        equipment_definition(
+            EquipmentPart.ARMS,
+            "equipment:arms",
+            skills=arms_skills,
+            series_skill_id=(
+                series_skill_id if EquipmentPart.ARMS in series_parts else None
+            ),
+            group_skill_id=(
+                group_skill_id if EquipmentPart.ARMS in group_parts else None
+            ),
+        ),
         equipment_definition(
             EquipmentPart.WAIST,
             "equipment:waist",
             skills=waist_skills,
+            series_skill_id=(
+                series_skill_id if EquipmentPart.WAIST in series_parts else None
+            ),
+            group_skill_id=(
+                group_skill_id if EquipmentPart.WAIST in group_parts else None
+            ),
         ),
-        equipment_definition(EquipmentPart.LEGS, "equipment:legs", skills=legs_skills),
-        equipment_definition(EquipmentPart.CHARM, charm_id, skills=charm_skills),
+        equipment_definition(
+            EquipmentPart.LEGS,
+            "equipment:legs",
+            skills=legs_skills,
+            series_skill_id=(
+                series_skill_id if EquipmentPart.LEGS in series_parts else None
+            ),
+            group_skill_id=(
+                group_skill_id if EquipmentPart.LEGS in group_parts else None
+            ),
+        ),
+        equipment_definition(
+            EquipmentPart.CHARM,
+            charm_id,
+            skills=charm_skills,
+            series_skill_id=(
+                series_skill_id if EquipmentPart.CHARM in series_parts else None
+            ),
+            group_skill_id=(
+                group_skill_id if EquipmentPart.CHARM in group_parts else None
+            ),
+        ),
     )
+
+
+def bonus_skill_definition(
+    skill_id: str,
+    kind: SkillKind,
+    thresholds: tuple[int, ...],
+) -> SkillDefinition:
+    return SkillDefinition(
+        skill_id=skill_id,
+        kind=kind,
+        ranks=tuple(
+            SkillRankDefinition(level=level, required_pieces=required_pieces)
+            for level, required_pieces in enumerate(thresholds, start=1)
+        ),
+    )
+
+
+def series_skill_definition(
+    skill_id: str = "skill:series-bonus",
+    thresholds: tuple[int, ...] = (2, 4),
+) -> SkillDefinition:
+    return bonus_skill_definition(skill_id, SkillKind.SERIES, thresholds)
+
+
+def group_skill_definition(
+    skill_id: str = "skill:group-bonus",
+    thresholds: tuple[int, ...] = (3,),
+) -> SkillDefinition:
+    return bonus_skill_definition(skill_id, SkillKind.GROUP, thresholds)
 
 
 def two_head_equipment(
@@ -191,6 +291,10 @@ def decorations_generator() -> Iterator[DecorationDefinition]:
     yield decoration_definition()
 
 
+def skill_definitions_generator() -> Iterator[SkillDefinition]:
+    yield series_skill_definition()
+
+
 class EquipmentTuple(tuple):
     pass
 
@@ -208,6 +312,10 @@ class SkillLevelEntryTuple(tuple):
 
 
 class DecorationTuple(tuple):
+    pass
+
+
+class SkillDefinitionTuple(tuple):
     pass
 
 
@@ -470,6 +578,75 @@ def test_candidate_skill_levels_are_empty_when_no_skills_exist() -> None:
     assert candidates[0].skill_levels == ()
 
 
+def test_candidates_include_activated_series_and_group_skill_levels() -> None:
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(
+            series_parts=(
+                EquipmentPart.HEAD,
+                EquipmentPart.CHEST,
+                EquipmentPart.ARMS,
+                EquipmentPart.WAIST,
+            ),
+            group_parts=(
+                EquipmentPart.HEAD,
+                EquipmentPart.CHEST,
+                EquipmentPart.ARMS,
+            ),
+        ),
+        decorations=(),
+        skill_definitions=(series_skill_definition(), group_skill_definition()),
+    )
+
+    assert candidates[0].skill_levels == (
+        ("skill:series-bonus", 2),
+        ("skill:group-bonus", 1),
+    )
+
+
+def test_candidates_omit_memberships_below_activation_threshold() -> None:
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(series_parts=(EquipmentPart.HEAD,)),
+        decorations=(),
+        skill_definitions=(series_skill_definition(),),
+    )
+
+    assert candidates[0].skill_levels == ()
+
+
+def test_skill_definitions_do_not_change_candidate_order() -> None:
+    equipment = two_head_equipment(weapon_slots=(weapon_slot(1),))
+    decorations = (decoration_definition(),)
+
+    legacy = enumerate_build_candidates(
+        equipment=equipment,
+        decorations=decorations,
+    )
+    with_definitions = enumerate_build_candidates(
+        equipment=equipment,
+        decorations=decorations,
+        skill_definitions=(series_skill_definition(), group_skill_definition()),
+    )
+
+    assert [(build.equipment, build.placements) for build in with_definitions] == [
+        (build.equipment, build.placements) for build in legacy
+    ]
+
+
+def test_direct_enumeration_without_memberships_remains_backward_compatible() -> None:
+    equipment = complete_equipment(
+        weapon_skills=(skill("skill:attack-boost", 1),),
+    )
+
+    assert enumerate_build_candidates(
+        equipment=equipment,
+        decorations=(),
+    ) == enumerate_build_candidates(
+        equipment=equipment,
+        decorations=(),
+        skill_definitions=(),
+    )
+
+
 def test_two_head_candidates_return_two_build_candidates() -> None:
     candidates = enumerate_build_candidates(
         equipment=two_head_equipment(), decorations=()
@@ -592,13 +769,20 @@ def test_returns_new_tuple_each_call() -> None:
 def test_inputs_are_not_modified() -> None:
     equipment = complete_equipment(weapon_slots=(weapon_slot(1),))
     decorations = (decoration_definition(),)
+    skill_definitions = (series_skill_definition(),)
     original_equipment = equipment
     original_decorations = decorations
+    original_skill_definitions = skill_definitions
 
-    enumerate_build_candidates(equipment=equipment, decorations=decorations)
+    enumerate_build_candidates(
+        equipment=equipment,
+        decorations=decorations,
+        skill_definitions=skill_definitions,
+    )
 
     assert equipment == original_equipment
     assert decorations == original_decorations
+    assert skill_definitions == original_skill_definitions
 
 
 def test_enumerate_build_candidates_requires_keyword_arguments() -> None:
@@ -606,6 +790,10 @@ def test_enumerate_build_candidates_requires_keyword_arguments() -> None:
 
     assert signature.parameters["equipment"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["decorations"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert (
+        signature.parameters["skill_definitions"].kind is inspect.Parameter.KEYWORD_ONLY
+    )
+    assert signature.parameters["skill_definitions"].default == ()
 
     with pytest.raises(TypeError):
         enumerate_build_candidates(complete_equipment(), ())  # type: ignore[call-arg]
@@ -710,6 +898,57 @@ def test_rejects_decorations_tuple_subclass() -> None:
         enumerate_build_candidates(
             equipment=complete_equipment(),
             decorations=DecorationTuple((decoration_definition(),)),
+        )
+
+
+@pytest.mark.parametrize(
+    "skill_definitions",
+    [
+        [series_skill_definition()],
+        {series_skill_definition()},
+        skill_definitions_generator(),
+        None,
+    ],
+)
+def test_rejects_non_tuple_skill_definitions(skill_definitions: object) -> None:
+    with pytest.raises(TypeError, match="skill_definitions"):
+        enumerate_build_candidates(
+            equipment=complete_equipment(),
+            decorations=(),
+            skill_definitions=skill_definitions,  # type: ignore[arg-type]
+        )
+
+
+def test_rejects_skill_definitions_tuple_subclass() -> None:
+    with pytest.raises(TypeError, match="skill_definitions"):
+        enumerate_build_candidates(
+            equipment=complete_equipment(),
+            decorations=(),
+            skill_definitions=SkillDefinitionTuple((series_skill_definition(),)),
+        )
+
+
+@pytest.mark.parametrize("invalid_definition", ["skill", None, 1])
+def test_rejects_invalid_skill_definition_elements(
+    invalid_definition: object,
+) -> None:
+    with pytest.raises(TypeError, match="skill_definitions"):
+        enumerate_build_candidates(
+            equipment=complete_equipment(),
+            decorations=(),
+            skill_definitions=(invalid_definition,),  # type: ignore[arg-type]
+        )
+
+
+def test_rejects_duplicate_skill_definition_ids() -> None:
+    with pytest.raises(ValueError, match="skill_definitions"):
+        enumerate_build_candidates(
+            equipment=complete_equipment(),
+            decorations=(),
+            skill_definitions=(
+                series_skill_definition("skill:duplicate", (1,)),
+                group_skill_definition("skill:duplicate", (1,)),
+            ),
         )
 
 

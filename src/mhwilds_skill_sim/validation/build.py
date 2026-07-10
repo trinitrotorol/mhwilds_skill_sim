@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mhwilds_skill_sim.domain.bonus import (
+    calculate_equipment_bonus_skill_contributions,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition
-from mhwilds_skill_sim.domain.skill import SkillContribution, aggregate_skill_levels
+from mhwilds_skill_sim.domain.skill import (
+    SkillContribution,
+    SkillDefinition,
+    aggregate_skill_levels,
+)
 from mhwilds_skill_sim.validation.equipment_selection import (
     EquipmentSelectionIssue,
     validate_equipment_selection,
@@ -69,6 +76,7 @@ def aggregate_valid_build_skill_levels(
     equipment: tuple[EquipmentDefinition, ...],
     decorations: tuple[DecorationDefinition, ...],
     placements: tuple[DecorationPlacement, ...],
+    skill_definitions: tuple[SkillDefinition, ...] = (),
 ) -> dict[str, int]:
     validation_result = validate_build(
         equipment=equipment,
@@ -86,6 +94,13 @@ def aggregate_valid_build_skill_levels(
     contributions: list[SkillContribution] = []
     for definition in equipment:
         contributions.extend(definition.skills)
+
+    contributions.extend(
+        calculate_equipment_bonus_skill_contributions(
+            equipment=equipment,
+            skill_definitions=skill_definitions,
+        )
+    )
 
     decorations_by_id = {
         definition.decoration_id: definition for definition in decorations

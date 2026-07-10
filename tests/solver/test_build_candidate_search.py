@@ -7,7 +7,12 @@ import pytest
 
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
-from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.skill import (
+    SkillContribution,
+    SkillDefinition,
+    SkillKind,
+    SkillRankDefinition,
+)
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 from mhwilds_skill_sim.solver import (
     BuildCandidate,
@@ -49,12 +54,16 @@ def equipment_definition(
     *,
     skills: tuple[SkillContribution, ...] = (),
     slots: tuple[DecorationSlot, ...] = (),
+    series_skill_id: str | None = None,
+    group_skill_id: str | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
         part=part,
         skills=skills,
         slots=slots,
+        series_skill_id=series_skill_id,
+        group_skill_id=group_skill_id,
     )
 
 
@@ -71,29 +80,69 @@ def complete_equipment(
     legs_skills: tuple[SkillContribution, ...] = (),
     charm_skills: tuple[SkillContribution, ...] = (),
     weapon_slots: tuple[DecorationSlot, ...] = (),
+    series_parts: tuple[EquipmentPart, ...] = (),
+    group_parts: tuple[EquipmentPart, ...] = (),
+    series_skill_id: str = "skill:series-bonus",
+    group_skill_id: str = "skill:group-bonus",
 ) -> tuple[EquipmentDefinition, ...]:
-    return (
+    equipment_ids = {
+        EquipmentPart.WEAPON: weapon_id,
+        EquipmentPart.HEAD: head_id,
+        EquipmentPart.CHEST: "equipment:chest",
+        EquipmentPart.ARMS: "equipment:arms",
+        EquipmentPart.WAIST: "equipment:waist",
+        EquipmentPart.LEGS: "equipment:legs",
+        EquipmentPart.CHARM: charm_id,
+    }
+    skills_by_part = {
+        EquipmentPart.WEAPON: weapon_skills,
+        EquipmentPart.HEAD: head_skills,
+        EquipmentPart.CHEST: chest_skills,
+        EquipmentPart.ARMS: arms_skills,
+        EquipmentPart.WAIST: waist_skills,
+        EquipmentPart.LEGS: legs_skills,
+        EquipmentPart.CHARM: charm_skills,
+    }
+    return tuple(
         equipment_definition(
-            EquipmentPart.WEAPON,
-            weapon_id,
-            skills=weapon_skills,
-            slots=weapon_slots,
-        ),
-        equipment_definition(EquipmentPart.HEAD, head_id, skills=head_skills),
-        equipment_definition(
-            EquipmentPart.CHEST,
-            "equipment:chest",
-            skills=chest_skills,
-        ),
-        equipment_definition(EquipmentPart.ARMS, "equipment:arms", skills=arms_skills),
-        equipment_definition(
-            EquipmentPart.WAIST,
-            "equipment:waist",
-            skills=waist_skills,
-        ),
-        equipment_definition(EquipmentPart.LEGS, "equipment:legs", skills=legs_skills),
-        equipment_definition(EquipmentPart.CHARM, charm_id, skills=charm_skills),
+            part,
+            equipment_ids[part],
+            skills=skills_by_part[part],
+            slots=weapon_slots if part is EquipmentPart.WEAPON else (),
+            series_skill_id=series_skill_id if part in series_parts else None,
+            group_skill_id=group_skill_id if part in group_parts else None,
+        )
+        for part in REQUIRED_PARTS
     )
+
+
+def bonus_skill_definition(
+    skill_id: str,
+    kind: SkillKind,
+    thresholds: tuple[int, ...],
+) -> SkillDefinition:
+    return SkillDefinition(
+        skill_id=skill_id,
+        kind=kind,
+        ranks=tuple(
+            SkillRankDefinition(level=level, required_pieces=required_pieces)
+            for level, required_pieces in enumerate(thresholds, start=1)
+        ),
+    )
+
+
+def series_skill_definition(
+    skill_id: str = "skill:series-bonus",
+    thresholds: tuple[int, ...] = (2, 4),
+) -> SkillDefinition:
+    return bonus_skill_definition(skill_id, SkillKind.SERIES, thresholds)
+
+
+def group_skill_definition(
+    skill_id: str = "skill:group-bonus",
+    thresholds: tuple[int, ...] = (3,),
+) -> SkillDefinition:
+    return bonus_skill_definition(skill_id, SkillKind.GROUP, thresholds)
 
 
 def two_head_equipment(
@@ -163,11 +212,13 @@ def search_candidates(
     equipment: tuple[EquipmentDefinition, ...],
     decorations: tuple[DecorationDefinition, ...],
     requirements: tuple[SkillRequirement, ...],
+    skill_definitions: tuple[SkillDefinition, ...] = (),
 ) -> tuple[BuildCandidate, ...]:
     return search_build_candidates_by_skill_requirements(
         equipment=equipment,
         decorations=decorations,
         requirements=requirements,
+        skill_definitions=skill_definitions,
     )
 
 
@@ -243,6 +294,67 @@ def test_equipment_skills_alone_can_satisfy_requirements() -> None:
     assert candidate_equipment_ids(result) == (
         tuple(definition.equipment_id for definition in equipment),
     )
+
+
+def test_direct_search_can_satisfy_series_skill_requirement() -> None:
+    result = search_candidates(
+        equipment=complete_equipment(
+            series_parts=(EquipmentPart.HEAD, EquipmentPart.CHEST),
+        ),
+        decorations=(),
+        requirements=(requirement("skill:series-bonus", 1),),
+        skill_definitions=(series_skill_definition(),),
+    )
+
+    assert len(result) == 1
+    assert dict(result[0].skill_levels)["skill:series-bonus"] == 1
+
+
+def test_direct_search_can_satisfy_group_skill_requirement() -> None:
+    result = search_candidates(
+        equipment=complete_equipment(
+            group_parts=(
+                EquipmentPart.HEAD,
+                EquipmentPart.CHEST,
+                EquipmentPart.ARMS,
+            ),
+        ),
+        decorations=(),
+        requirements=(requirement("skill:group-bonus", 1),),
+        skill_definitions=(group_skill_definition(),),
+    )
+
+    assert len(result) == 1
+    assert dict(result[0].skill_levels)["skill:group-bonus"] == 1
+
+
+def test_omitting_skill_definitions_preserves_legacy_no_membership_search() -> None:
+    equipment = complete_equipment(
+        weapon_skills=(skill("skill:attack-boost", 1),),
+    )
+    requirements = (requirement("skill:attack-boost", 1),)
+
+    assert search_candidates(
+        equipment=equipment,
+        decorations=(),
+        requirements=requirements,
+    ) == search_candidates(
+        equipment=equipment,
+        decorations=(),
+        requirements=requirements,
+        skill_definitions=(),
+    )
+
+
+def test_skill_definitions_are_passed_through_to_enumeration() -> None:
+    equipment = complete_equipment(series_parts=(EquipmentPart.HEAD,))
+
+    with pytest.raises(ValueError, match="series_skill_id"):
+        search_candidates(
+            equipment=equipment,
+            decorations=(),
+            requirements=(),
+        )
 
 
 def test_decoration_skills_can_satisfy_requirements() -> None:
@@ -364,6 +476,26 @@ def test_result_preserves_enumeration_order_after_filtering() -> None:
     ]
 
 
+def test_result_order_is_unchanged_when_skill_definitions_are_supplied() -> None:
+    equipment = two_head_equipment(weapon_slots=(weapon_slot(1),))
+    decorations = (decoration_definition(),)
+    requirements = (requirement("skill:decoration-default", 1),)
+
+    legacy = search_candidates(
+        equipment=equipment,
+        decorations=decorations,
+        requirements=requirements,
+    )
+    with_definitions = search_candidates(
+        equipment=equipment,
+        decorations=decorations,
+        requirements=requirements,
+        skill_definitions=(series_skill_definition(), group_skill_definition()),
+    )
+
+    assert with_definitions == legacy
+
+
 def test_returns_tuple_with_build_candidate_elements() -> None:
     result = search_candidates(
         equipment=complete_equipment(),
@@ -381,6 +513,10 @@ def test_search_requires_keyword_arguments() -> None:
     assert signature.parameters["equipment"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["decorations"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["requirements"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert (
+        signature.parameters["skill_definitions"].kind is inspect.Parameter.KEYWORD_ONLY
+    )
+    assert signature.parameters["skill_definitions"].default == ()
 
     with pytest.raises(TypeError):
         search_build_candidates_by_skill_requirements(complete_equipment(), (), ())  # type: ignore[call-arg]
@@ -390,19 +526,23 @@ def test_inputs_are_not_modified() -> None:
     equipment = complete_equipment(weapon_slots=(weapon_slot(1),))
     decorations = (decoration_definition(),)
     requirements = (requirement("skill:decoration-default", 1),)
+    skill_definitions = (series_skill_definition(),)
     original_equipment = equipment
     original_decorations = decorations
     original_requirements = requirements
+    original_skill_definitions = skill_definitions
 
     search_candidates(
         equipment=equipment,
         decorations=decorations,
         requirements=requirements,
+        skill_definitions=skill_definitions,
     )
 
     assert equipment == original_equipment
     assert decorations == original_decorations
     assert requirements == original_requirements
+    assert skill_definitions == original_skill_definitions
 
 
 def test_solver_package_exports_search_and_keeps_existing_public_exports() -> None:

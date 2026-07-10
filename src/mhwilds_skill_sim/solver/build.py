@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition
+from mhwilds_skill_sim.domain.skill import SkillDefinition
 from mhwilds_skill_sim.solver.decoration import (
     enumerate_decoration_placement_combinations,
 )
@@ -30,9 +31,11 @@ def enumerate_build_candidates(
     *,
     equipment: tuple[EquipmentDefinition, ...],
     decorations: tuple[DecorationDefinition, ...],
+    skill_definitions: tuple[SkillDefinition, ...] = (),
 ) -> tuple[BuildCandidate, ...]:
     _validate_equipment(value=equipment)
     _validate_decorations(value=decorations)
+    _validate_skill_definitions(value=skill_definitions)
     _validate_unique_equipment_ids(equipment=equipment)
     _validate_unique_decoration_ids(decorations=decorations)
 
@@ -46,6 +49,7 @@ def enumerate_build_candidates(
                 equipment=selection,
                 decorations=decorations,
                 placements=placements,
+                skill_definitions=skill_definitions,
             )
             candidates.append(
                 BuildCandidate(
@@ -74,6 +78,21 @@ def _validate_decorations(*, value: object) -> None:
     for definition in value:
         if not isinstance(definition, DecorationDefinition):
             raise TypeError("decorations must contain only DecorationDefinition")
+
+
+def _validate_skill_definitions(*, value: object) -> None:
+    if type(value) is not tuple:
+        raise TypeError("skill_definitions must be tuple")
+
+    seen_skill_ids: set[str] = set()
+    for definition in value:
+        if not isinstance(definition, SkillDefinition):
+            raise TypeError("skill_definitions must contain only SkillDefinition")
+
+        if definition.skill_id in seen_skill_ids:
+            raise ValueError("skill_definitions must not contain duplicate skill_id")
+
+        seen_skill_ids.add(definition.skill_id)
 
 
 def _validate_placements(*, value: object) -> None:

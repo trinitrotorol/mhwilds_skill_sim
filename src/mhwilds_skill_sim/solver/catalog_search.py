@@ -22,4 +22,5 @@ def search_catalog_build_candidates_by_skill_requirements(
         equipment=catalog.equipment,
         decorations=catalog.decorations,
         requirements=requirements,
+        skill_definitions=catalog.skills,
     )

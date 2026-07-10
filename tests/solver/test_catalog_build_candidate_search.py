@@ -117,6 +117,14 @@ def catalog_search(
     )
 
 
+def selected_head_id(candidate: BuildCandidate) -> str:
+    return next(
+        equipment.equipment_id
+        for equipment in candidate.equipment
+        if equipment.part is EquipmentPart.HEAD
+    )
+
+
 def test_empty_catalog_and_empty_requirements_returns_empty_tuple() -> None:
     catalog = Catalog(schema_version=1, equipment=(), decorations=())
 
@@ -133,7 +141,83 @@ def test_tiny_catalog_empty_requirements_returns_candidates() -> None:
         equipment=catalog.equipment,
         decorations=catalog.decorations,
         requirements=(),
+        skill_definitions=catalog.skills,
     )
+
+
+def test_all_tiny_catalog_candidates_expose_expected_bonus_levels() -> None:
+    result = catalog_search(catalog=tiny_catalog(), requirements=())
+
+    assert result
+    for candidate in result:
+        skill_levels = dict(candidate.skill_levels)
+        if selected_head_id(candidate) == "fixture:head:precision-alpha":
+            assert skill_levels["skill:fixture-series-bonus"] == 2
+            assert skill_levels["skill:fixture-group-bonus"] == 1
+        else:
+            assert selected_head_id(candidate) == "fixture:head:tenderizer-beta"
+            assert skill_levels["skill:fixture-series-bonus"] == 1
+            assert "skill:fixture-group-bonus" not in skill_levels
+
+
+def test_series_level_two_requirement_returns_only_alpha_head_route() -> None:
+    result = catalog_search(
+        catalog=tiny_catalog(),
+        requirements=(requirement("skill:fixture-series-bonus", 2),),
+    )
+
+    assert result
+    assert {selected_head_id(candidate) for candidate in result} == {
+        "fixture:head:precision-alpha"
+    }
+
+
+def test_group_level_one_requirement_returns_only_alpha_head_route() -> None:
+    result = catalog_search(
+        catalog=tiny_catalog(),
+        requirements=(requirement("skill:fixture-group-bonus", 1),),
+    )
+
+    assert result
+    assert {selected_head_id(candidate) for candidate in result} == {
+        "fixture:head:precision-alpha"
+    }
+
+
+def test_series_level_one_requirement_includes_both_head_routes() -> None:
+    result = catalog_search(
+        catalog=tiny_catalog(),
+        requirements=(requirement("skill:fixture-series-bonus", 1),),
+    )
+
+    assert {selected_head_id(candidate) for candidate in result} == {
+        "fixture:head:precision-alpha",
+        "fixture:head:tenderizer-beta",
+    }
+
+
+def test_beta_head_empty_placement_candidate_has_only_lower_series_bonus() -> None:
+    candidate = next(
+        candidate
+        for candidate in catalog_search(catalog=tiny_catalog(), requirements=())
+        if selected_head_id(candidate) == "fixture:head:tenderizer-beta"
+        and candidate.placements == ()
+    )
+
+    assert dict(candidate.skill_levels)["skill:fixture-series-bonus"] == 1
+    assert "skill:fixture-group-bonus" not in dict(candidate.skill_levels)
+
+
+def test_alpha_head_empty_placement_candidate_has_both_bonus_skills() -> None:
+    candidate = next(
+        candidate
+        for candidate in catalog_search(catalog=tiny_catalog(), requirements=())
+        if selected_head_id(candidate) == "fixture:head:precision-alpha"
+        and candidate.placements == ()
+    )
+
+    assert dict(candidate.skill_levels)["skill:fixture-series-bonus"] == 2
+    assert dict(candidate.skill_levels)["skill:fixture-group-bonus"] == 1
 
 
 def test_tiny_catalog_equipment_skills_can_satisfy_requirements() -> None:
@@ -200,6 +284,7 @@ def test_result_order_matches_existing_search_order() -> None:
         equipment=catalog.equipment,
         decorations=catalog.decorations,
         requirements=requirements,
+        skill_definitions=catalog.skills,
     )
 
     assert result == direct_result
@@ -287,6 +372,7 @@ def test_delegates_to_existing_search_with_catalog_contents() -> None:
             equipment=catalog.equipment,
             decorations=catalog.decorations,
             requirements=requirements,
+            skill_definitions=catalog.skills,
         )
     )
 
@@ -304,6 +390,27 @@ def test_accepts_catalog_subclass() -> None:
     catalog = CatalogSubclass(schema_version=1, equipment=(), decorations=())
 
     assert catalog_search(catalog=catalog, requirements=()) == ()
+
+
+def test_catalog_subclass_uses_bonus_skill_definitions() -> None:
+    base_catalog = tiny_catalog()
+    catalog = CatalogSubclass(
+        schema_version=base_catalog.schema_version,
+        equipment=base_catalog.equipment,
+        decorations=base_catalog.decorations,
+        skills=base_catalog.skills,
+    )
+
+    result = catalog_search(
+        catalog=catalog,
+        requirements=(requirement("skill:fixture-group-bonus", 1),),
+    )
+
+    assert result
+    assert all(
+        selected_head_id(candidate) == "fixture:head:precision-alpha"
+        for candidate in result
+    )
 
 
 def test_propagates_requirement_list_type_error() -> None:
@@ -350,16 +457,18 @@ def test_manual_catalog_search_does_not_require_load_catalog() -> None:
 
 
 def test_search_does_not_rank_or_limit_satisfying_candidates() -> None:
+    catalog = tiny_catalog()
     result = catalog_search(
-        catalog=tiny_catalog(),
+        catalog=catalog,
         requirements=(requirement("skill:attack-boost", 3),),
     )
 
     assert len(result) > 1
     assert result == search_build_candidates_by_skill_requirements(
-        equipment=tiny_catalog().equipment,
-        decorations=tiny_catalog().decorations,
+        equipment=catalog.equipment,
+        decorations=catalog.decorations,
         requirements=(requirement("skill:attack-boost", 3),),
+        skill_definitions=catalog.skills,
     )
 
 

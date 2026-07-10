@@ -94,6 +94,14 @@ def response_contains_unserializable_value(value: object) -> bool:
     return isinstance(value, tuple | Enum) or is_dataclass(value)
 
 
+def response_candidate_skill_levels(candidate: dict[str, object]) -> dict[str, int]:
+    skill_levels = candidate["skill_levels"]
+    assert isinstance(skill_levels, list)
+    return {
+        skill_level["skill_id"]: skill_level["level"] for skill_level in skill_levels
+    }
+
+
 def test_empty_catalog_and_empty_requirements_return_response_dict() -> None:
     response = search_catalog_build_candidates_from_payload(
         catalog=empty_catalog(),
@@ -154,6 +162,73 @@ def test_tiny_catalog_handles_decoration_skill_requirement_payload() -> None:
     assert response == expected_response(catalog=catalog, payload_value=payload_value)
     assert len(response["candidates"]) == 5  # type: ignore[arg-type]
     assert response["total_count"] >= 5  # type: ignore[operator]
+
+
+def test_tiny_catalog_handles_series_bonus_requirement_payload() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=tiny_catalog(),
+        payload=payload(
+            requirements=[requirement("skill:fixture-series-bonus", 2)],
+            max_results=3,
+        ),
+    )
+
+    candidates = response["candidates"]
+    assert isinstance(candidates, list)
+    assert candidates
+    assert all(
+        response_candidate_skill_levels(candidate)["skill:fixture-series-bonus"] >= 2
+        for candidate in candidates
+    )
+
+
+def test_tiny_catalog_handles_group_bonus_requirement_payload() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=tiny_catalog(),
+        payload=payload(
+            requirements=[requirement("skill:fixture-group-bonus", 1)],
+            max_results=3,
+        ),
+    )
+
+    candidates = response["candidates"]
+    assert isinstance(candidates, list)
+    assert candidates
+    assert all(
+        response_candidate_skill_levels(candidate)["skill:fixture-group-bonus"] >= 1
+        for candidate in candidates
+    )
+
+
+def test_impossible_bonus_level_returns_zero_candidates() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=tiny_catalog(),
+        payload=payload(
+            requirements=[requirement("skill:fixture-series-bonus", 3)],
+            max_results=10,
+        ),
+    )
+
+    assert response == {
+        "candidates": [],
+        "total_count": 0,
+        "truncated": False,
+    }
+
+
+def test_bonus_requirement_preserves_max_results_and_truncation() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=tiny_catalog(),
+        payload=payload(
+            requirements=[requirement("skill:fixture-series-bonus", 2)],
+            max_results=1,
+        ),
+    )
+
+    assert len(response["candidates"]) == 1  # type: ignore[arg-type]
+    assert response["total_count"] > 1  # type: ignore[operator]
+    assert response["truncated"] is True
+    json.dumps(response)
 
 
 def test_unsatisfied_requirements_return_empty_candidates_response() -> None:
