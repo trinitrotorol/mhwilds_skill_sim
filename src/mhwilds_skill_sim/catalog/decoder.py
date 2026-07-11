@@ -51,6 +51,7 @@ _EQUIPMENT_DEFINITION_KEYS = frozenset(
         "group_skill_id",
         "allows_series_skill_assignment",
         "allows_group_skill_assignment",
+        "display_name",
     )
 )
 _EQUIPMENT_DEFINITION_KEY_ORDER = ("equipment_id", "part", "skills", "slots")
@@ -455,6 +456,7 @@ def decode_equipment_definition(
                 "allows_group_skill_assignment",
                 False,
             ),
+            display_name=value.get("display_name"),
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc

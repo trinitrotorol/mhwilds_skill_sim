@@ -1,0 +1,37 @@
+[
+  {
+    "id": 701,
+    "gameId": -3001,
+    "name": "テストシリーズα",
+    "setBonusSkill": {
+      "id": 503,
+      "gameId": 1003,
+      "name": "ignored series skill stub"
+    },
+    "groupBonusSkill": {
+      "id": 504,
+      "gameId": 1004,
+      "name": "ignored group skill stub"
+    },
+    "description": "ignored alpha armor set",
+    "pieces": [
+      {
+        "id": 801,
+        "name": "ignored embedded armor piece"
+      }
+    ]
+  },
+  {
+    "id": 702,
+    "gameId": 3002,
+    "name": "テストシリーズβ",
+    "setBonusSkill": null,
+    "groupBonusSkill": {
+      "id": 504,
+      "gameId": 1004,
+      "name": "ignored group skill stub"
+    },
+    "description": "ignored beta armor set",
+    "pieces": []
+  }
+]

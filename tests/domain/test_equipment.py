@@ -58,6 +58,7 @@ def equipment(
     group_skill_id: str | None = None,
     allows_series_skill_assignment: bool = False,
     allows_group_skill_assignment: bool = False,
+    display_name: str | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
@@ -68,6 +69,7 @@ def equipment(
         group_skill_id=group_skill_id,
         allows_series_skill_assignment=allows_series_skill_assignment,
         allows_group_skill_assignment=allows_group_skill_assignment,
+        display_name=display_name,
     )
 
 
@@ -756,3 +758,84 @@ def test_domain_package_keeps_existing_public_exports_with_equipment_definition(
     assert ExportedEquipmentPart is EquipmentPart
     assert ExportedSkillContribution is SkillContribution
     assert exported_can_place_decoration is can_place_decoration
+
+
+def test_equipment_display_name_defaults_to_none() -> None:
+    definition = EquipmentDefinition(
+        "armor:head:test",
+        EquipmentPart.HEAD,
+        (),
+        (),
+    )
+
+    assert definition.display_name is None
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    [
+        "テストヘルムα",
+        "Hope Helm Alpha",
+        "Hope  Helm: Alpha (Test)",
+        "hOPE Helm-A",
+    ],
+)
+def test_equipment_preserves_valid_display_name_exactly(display_name: str) -> None:
+    definition = equipment(display_name=display_name)
+
+    assert definition.display_name == display_name
+
+
+def test_equipment_equality_and_hash_include_display_name() -> None:
+    without_name = equipment()
+    with_name = equipment(display_name="Hope Helm")
+    same_name = equipment(display_name="Hope Helm")
+
+    assert with_name == same_name
+    assert hash(with_name) == hash(same_name)
+    assert without_name != with_name
+    assert len({without_name, with_name}) == 2
+
+
+def test_equipment_display_name_is_frozen() -> None:
+    definition = equipment(display_name="Hope Helm")
+
+    with pytest.raises(FrozenInstanceError):
+        definition.display_name = "Other Helm"
+
+
+@pytest.mark.parametrize("display_name", ["", " ", "\t\n"])
+def test_equipment_rejects_empty_or_blank_display_name(display_name: str) -> None:
+    with pytest.raises(ValueError, match="display_name"):
+        equipment(display_name=display_name)
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    [" Hope Helm", "\tHope Helm", "Hope Helm ", "Hope Helm\n"],
+)
+def test_equipment_rejects_display_name_edge_whitespace(
+    display_name: str,
+) -> None:
+    with pytest.raises(ValueError, match="display_name"):
+        equipment(display_name=display_name)
+
+
+@pytest.mark.parametrize("display_name", [True, False, 1, 1.5, [], object()])
+def test_equipment_rejects_non_string_display_name(display_name: object) -> None:
+    with pytest.raises(TypeError, match="display_name"):
+        EquipmentDefinition(
+            equipment_id="armor:head:test",
+            part=EquipmentPart.HEAD,
+            skills=(),
+            slots=(),
+            display_name=display_name,  # type: ignore[arg-type]
+        )
+
+
+def test_equipment_rejects_display_name_string_subclass() -> None:
+    class DisplayName(str):
+        pass
+
+    with pytest.raises(TypeError, match="display_name"):
+        equipment(display_name=DisplayName("Hope Helm"))

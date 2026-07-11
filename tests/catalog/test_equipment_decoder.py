@@ -596,3 +596,108 @@ def test_catalog_decode_error_still_imports_directly() -> None:
     error = CatalogDecodeError(path="$.equipment[0]", detail="invalid object")
 
     assert str(error) == "$.equipment[0]: invalid object"
+
+
+def test_decode_normalized_equipment_without_display_name_remains_valid() -> None:
+    decoded = decode_equipment_definition(value=armor_value())
+
+    assert decoded.display_name is None
+
+
+def test_decode_normalized_equipment_accepts_explicit_null_display_name() -> None:
+    value = armor_value()
+    value["display_name"] = None
+
+    decoded = decode_equipment_definition(value=value)
+
+    assert decoded.display_name is None
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    ["テストヘルムα", "Hope Helm Alpha", "Hope  Helm: Alpha"],
+)
+def test_decode_normalized_equipment_preserves_display_name(
+    display_name: str,
+) -> None:
+    value = armor_value()
+    value["display_name"] = display_name
+
+    decoded = decode_equipment_definition(value=value)
+
+    assert decoded.display_name == display_name
+
+
+def test_decode_normalized_equipment_display_name_key_order_is_independent() -> None:
+    decoded = decode_equipment_definition(
+        value={
+            "display_name": "テストヘルムα",
+            "allows_group_skill_assignment": False,
+            "group_skill_id": "mhdb:skill:1004",
+            "slots": [{"level": 2, "kind": "armor"}],
+            "skills": [{"level": 1, "skill_id": "mhdb:skill:1001"}],
+            "part": "head",
+            "allows_series_skill_assignment": False,
+            "series_skill_id": "mhdb:skill:1003",
+            "equipment_id": "mhdb:armor:-3001:head",
+        }
+    )
+
+    assert decoded.display_name == "テストヘルムα"
+    assert decoded.series_skill_id == "mhdb:skill:1003"
+    assert decoded.group_skill_id == "mhdb:skill:1004"
+
+
+@pytest.mark.parametrize(
+    ("display_name", "expected_cause"),
+    [
+        (True, TypeError),
+        (1, TypeError),
+        (1.5, TypeError),
+        ([], TypeError),
+        ("", ValueError),
+        ("   ", ValueError),
+        (" Hope Helm", ValueError),
+        ("Hope Helm ", ValueError),
+    ],
+)
+def test_decode_normalized_equipment_wraps_invalid_display_name(
+    display_name: object,
+    expected_cause: type[Exception],
+) -> None:
+    value = armor_value()
+    value["display_name"] = display_name
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[0]")
+
+    assert exc_info.value.path == "$.equipment[0]"
+    assert "display_name" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+def test_decode_normalized_equipment_rejects_display_name_string_subclass() -> None:
+    class DisplayName(str):
+        pass
+
+    value = armor_value()
+    value["display_name"] = DisplayName("Hope Helm")
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[0]")
+
+    assert exc_info.value.path == "$.equipment[0]"
+    assert "display_name" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, TypeError)
+
+
+def test_normalized_equipment_with_display_name_still_rejects_unknown_key() -> None:
+    value = armor_value()
+    value["display_name"] = "テストヘルムα"
+    value["unknown"] = True
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[0]")
+
+    assert exc_info.value.path == "$.equipment[0]"
+    assert "unknown" in exc_info.value.detail

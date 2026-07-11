@@ -29,6 +29,7 @@ class EquipmentDefinition:
     group_skill_id: str | None = None
     allows_series_skill_assignment: bool = False
     allows_group_skill_assignment: bool = False
+    display_name: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.equipment_id) is not str:
@@ -122,3 +123,18 @@ class EquipmentDefinition:
 
         if self.allows_group_skill_assignment and self.part is not EquipmentPart.WEAPON:
             raise ValueError("allows_group_skill_assignment requires weapon equipment")
+
+        if self.display_name is not None:
+            if type(self.display_name) is not str:
+                raise TypeError("display_name must be str or None")
+
+            if self.display_name == "":
+                raise ValueError("display_name must not be empty")
+
+            if self.display_name.strip() == "":
+                raise ValueError("display_name must not be blank")
+
+            if self.display_name != self.display_name.strip():
+                raise ValueError(
+                    "display_name must not have leading or trailing whitespace"
+                )

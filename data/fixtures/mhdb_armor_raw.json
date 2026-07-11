@@ -1,0 +1,126 @@
+[
+  {
+    "id": 801,
+    "name": "テストヘルムα",
+    "kind": "head",
+    "armorSet": {
+      "id": 701,
+      "name": "ignored alpha armor-set stub"
+    },
+    "skills": [
+      {
+        "skill": {
+          "gameId": 1001,
+          "name": "ignored armor skill stub"
+        },
+        "level": 1,
+        "description": "ignored armor skill-rank field"
+      }
+    ],
+    "slots": [
+      2,
+      1
+    ],
+    "defense": 10
+  },
+  {
+    "id": 802,
+    "name": "テストメイルα",
+    "kind": "chest",
+    "armorSet": {
+      "id": 701,
+      "name": "ignored alpha armor-set stub"
+    },
+    "skills": [],
+    "slots": [
+      1
+    ],
+    "rarity": 4
+  },
+  {
+    "id": 803,
+    "name": "テストアームα",
+    "kind": "arms",
+    "armorSet": {
+      "id": 701,
+      "name": "ignored alpha armor-set stub"
+    },
+    "skills": [
+      {
+        "skill": {
+          "gameId": 1001,
+          "name": "ignored armor skill stub"
+        },
+        "level": 2,
+        "description": "ignored armor skill-rank field"
+      }
+    ],
+    "slots": [],
+    "rank": "low"
+  },
+  {
+    "id": 804,
+    "name": "テストコイルα",
+    "kind": "waist",
+    "armorSet": {
+      "id": 701,
+      "name": "ignored alpha armor-set stub"
+    },
+    "skills": [
+      {
+        "skill": {
+          "gameId": 1001,
+          "name": "ignored armor skill stub"
+        },
+        "level": 1,
+        "description": "ignored armor skill-rank field"
+      }
+    ],
+    "slots": [
+      1,
+      1
+    ],
+    "description": "ignored alpha waist"
+  },
+  {
+    "id": 805,
+    "name": "テストグリーヴα",
+    "kind": "legs",
+    "armorSet": {
+      "id": 701,
+      "name": "ignored alpha armor-set stub"
+    },
+    "skills": [],
+    "slots": [
+      3
+    ],
+    "resistances": {
+      "fire": 1
+    }
+  },
+  {
+    "id": 806,
+    "name": "テストヘルムβ",
+    "kind": "head",
+    "armorSet": {
+      "id": 702,
+      "name": "ignored beta armor-set stub"
+    },
+    "skills": [
+      {
+        "skill": {
+          "gameId": 1001,
+          "name": "ignored armor skill stub"
+        },
+        "level": 1,
+        "description": "ignored armor skill-rank field"
+      }
+    ],
+    "slots": [
+      2
+    ],
+    "crafting": {
+      "ignored": true
+    }
+  }
+]
