@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
 from mhwilds_skill_sim.catalog.model import Catalog
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import (
@@ -16,6 +20,17 @@ from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
 _SKILL_CONTRIBUTION_KEYS = frozenset(("skill_id", "level"))
 _SKILL_CONTRIBUTION_KEY_ORDER = ("skill_id", "level")
+_APPRAISAL_CHARM_SKILL_GROUP_KEYS = frozenset(("group_id", "skills"))
+_APPRAISAL_CHARM_SKILL_GROUP_KEY_ORDER = ("group_id", "skills")
+_APPRAISAL_CHARM_PATTERN_KEYS = frozenset(
+    ("pattern_id", "rarity", "skill_group_ids", "slots")
+)
+_APPRAISAL_CHARM_PATTERN_KEY_ORDER = (
+    "pattern_id",
+    "rarity",
+    "skill_group_ids",
+    "slots",
+)
 _SKILL_RANK_DEFINITION_KEYS = frozenset(("level", "required_pieces"))
 _SKILL_RANK_DEFINITION_KEY_ORDER = ("level", "required_pieces")
 _SKILL_DEFINITION_KEYS = frozenset(("skill_id", "kind", "ranks"))
@@ -40,7 +55,16 @@ _EQUIPMENT_DEFINITION_KEYS = frozenset(
 )
 _EQUIPMENT_DEFINITION_KEY_ORDER = ("equipment_id", "part", "skills", "slots")
 _EQUIPMENT_PART_VALUES = ("weapon", "head", "chest", "arms", "waist", "legs", "charm")
-_CATALOG_KEYS = frozenset(("schema_version", "equipment", "decorations", "skills"))
+_CATALOG_KEYS = frozenset(
+    (
+        "schema_version",
+        "equipment",
+        "decorations",
+        "skills",
+        "appraisal_charm_skill_groups",
+        "appraisal_charm_patterns",
+    )
+)
 _CATALOG_KEY_ORDER = ("schema_version", "equipment", "decorations")
 
 
@@ -70,6 +94,62 @@ def decode_skill_contribution(
         return SkillContribution(
             skill_id=value["skill_id"],
             level=value["level"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(path=path, detail=str(exc)) from exc
+
+
+def decode_appraisal_charm_skill_group_definition(
+    *,
+    value: object,
+    path: str = "$",
+) -> AppraisalCharmSkillGroupDefinition:
+    if type(value) is not dict:
+        raise CatalogDecodeError(
+            path=path,
+            detail="expected appraisal charm skill group definition object",
+        )
+
+    missing_keys = [
+        key for key in _APPRAISAL_CHARM_SKILL_GROUP_KEY_ORDER if key not in value
+    ]
+    extra_keys = [key for key in value if key not in _APPRAISAL_CHARM_SKILL_GROUP_KEYS]
+
+    if missing_keys or extra_keys:
+        detail_parts: list[str] = []
+        if missing_keys:
+            detail_parts.append(f"missing keys: {', '.join(missing_keys)}")
+        if extra_keys:
+            detail_parts.append(
+                "unexpected keys: "
+                + ", ".join(_format_key(key) for key in _sort_keys(extra_keys)),
+            )
+        raise CatalogDecodeError(path=path, detail="; ".join(detail_parts))
+
+    if type(value["skills"]) is not list:
+        raise CatalogDecodeError(
+            path=f"{path}.skills",
+            detail="skills must be list",
+        )
+
+    if not value["skills"]:
+        raise CatalogDecodeError(
+            path=f"{path}.skills",
+            detail="skills must not be empty",
+        )
+
+    skills = tuple(
+        decode_skill_contribution(
+            value=skill,
+            path=f"{path}.skills[{index}]",
+        )
+        for index, skill in enumerate(value["skills"])
+    )
+
+    try:
+        return AppraisalCharmSkillGroupDefinition(
+            group_id=value["group_id"],
+            skills=skills,
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc
@@ -191,6 +271,65 @@ def decode_decoration_slot(
         return DecorationSlot(
             kind=_decode_decoration_kind(value["kind"]),
             level=value["level"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(path=path, detail=str(exc)) from exc
+
+
+def decode_appraisal_charm_pattern_definition(
+    *,
+    value: object,
+    path: str = "$",
+) -> AppraisalCharmPatternDefinition:
+    if type(value) is not dict:
+        raise CatalogDecodeError(
+            path=path,
+            detail="expected appraisal charm pattern definition object",
+        )
+
+    missing_keys = [
+        key for key in _APPRAISAL_CHARM_PATTERN_KEY_ORDER if key not in value
+    ]
+    extra_keys = [key for key in value if key not in _APPRAISAL_CHARM_PATTERN_KEYS]
+
+    if missing_keys or extra_keys:
+        detail_parts: list[str] = []
+        if missing_keys:
+            detail_parts.append(f"missing keys: {', '.join(missing_keys)}")
+        if extra_keys:
+            detail_parts.append(
+                "unexpected keys: "
+                + ", ".join(_format_key(key) for key in _sort_keys(extra_keys)),
+            )
+        raise CatalogDecodeError(path=path, detail="; ".join(detail_parts))
+
+    if type(value["skill_group_ids"]) is not list:
+        raise CatalogDecodeError(
+            path=f"{path}.skill_group_ids",
+            detail="skill_group_ids must be list",
+        )
+
+    if type(value["slots"]) is not list:
+        raise CatalogDecodeError(
+            path=f"{path}.slots",
+            detail="slots must be list",
+        )
+
+    skill_group_ids = tuple(value["skill_group_ids"])
+    slots = tuple(
+        decode_decoration_slot(
+            value=slot,
+            path=f"{path}.slots[{index}]",
+        )
+        for index, slot in enumerate(value["slots"])
+    )
+
+    try:
+        return AppraisalCharmPatternDefinition(
+            pattern_id=value["pattern_id"],
+            rarity=value["rarity"],
+            skill_group_ids=skill_group_ids,
+            slots=slots,
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc
@@ -415,6 +554,22 @@ def decode_catalog(
         if "skills" in value
         else ()
     )
+    appraisal_charm_skill_groups = (
+        _decode_catalog_appraisal_charm_skill_groups(
+            value=value["appraisal_charm_skill_groups"],
+            path=f"{path}.appraisal_charm_skill_groups",
+        )
+        if "appraisal_charm_skill_groups" in value
+        else ()
+    )
+    appraisal_charm_patterns = (
+        _decode_catalog_appraisal_charm_patterns(
+            value=value["appraisal_charm_patterns"],
+            path=f"{path}.appraisal_charm_patterns",
+        )
+        if "appraisal_charm_patterns" in value
+        else ()
+    )
 
     try:
         return Catalog(
@@ -422,6 +577,8 @@ def decode_catalog(
             equipment=equipment,
             decorations=decorations,
             skills=skills,
+            appraisal_charm_skill_groups=appraisal_charm_skill_groups,
+            appraisal_charm_patterns=appraisal_charm_patterns,
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc
@@ -476,6 +633,46 @@ def _decode_catalog_skills(
     return tuple(
         decode_skill_definition(value=skill, path=f"{path}[{index}]")
         for index, skill in enumerate(value)
+    )
+
+
+def _decode_catalog_appraisal_charm_skill_groups(
+    *,
+    value: object,
+    path: str,
+) -> tuple[AppraisalCharmSkillGroupDefinition, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(
+            path=path,
+            detail="appraisal_charm_skill_groups must be list",
+        )
+
+    return tuple(
+        decode_appraisal_charm_skill_group_definition(
+            value=group,
+            path=f"{path}[{index}]",
+        )
+        for index, group in enumerate(value)
+    )
+
+
+def _decode_catalog_appraisal_charm_patterns(
+    *,
+    value: object,
+    path: str,
+) -> tuple[AppraisalCharmPatternDefinition, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(
+            path=path,
+            detail="appraisal_charm_patterns must be list",
+        )
+
+    return tuple(
+        decode_appraisal_charm_pattern_definition(
+            value=pattern,
+            path=f"{path}[{index}]",
+        )
+        for index, pattern in enumerate(value)
     )
 
 

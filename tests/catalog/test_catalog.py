@@ -6,6 +6,10 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from mhwilds_skill_sim.catalog import Catalog
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import (
@@ -89,11 +93,37 @@ def group_skill_definition(
     )
 
 
+def appraisal_skill_group(
+    group_id: str = "appraisal-group:A",
+    skills: tuple[SkillContribution, ...] | None = None,
+) -> AppraisalCharmSkillGroupDefinition:
+    return AppraisalCharmSkillGroupDefinition(
+        group_id=group_id,
+        skills=skills if skills is not None else (skill(),),
+    )
+
+
+def appraisal_pattern(
+    pattern_id: str = "appraisal-pattern:r8-a",
+    skill_group_ids: tuple[str, ...] = ("appraisal-group:A",),
+    rarity: int = 8,
+    slots: tuple[DecorationSlot, ...] = (),
+) -> AppraisalCharmPatternDefinition:
+    return AppraisalCharmPatternDefinition(
+        pattern_id=pattern_id,
+        rarity=rarity,
+        skill_group_ids=skill_group_ids,
+        slots=slots,
+    )
+
+
 def catalog(
     schema_version: int = 1,
     equipment_items: tuple[EquipmentDefinition, ...] | None = None,
     decoration_items: tuple[DecorationDefinition, ...] | None = None,
     skill_items: tuple[SkillDefinition, ...] | None = None,
+    appraisal_group_items: tuple[AppraisalCharmSkillGroupDefinition, ...] | None = None,
+    appraisal_pattern_items: tuple[AppraisalCharmPatternDefinition, ...] | None = None,
 ) -> Catalog:
     return Catalog(
         schema_version=schema_version,
@@ -102,6 +132,12 @@ def catalog(
             decoration_items if decoration_items is not None else (decoration(),)
         ),
         skills=skill_items if skill_items is not None else (),
+        appraisal_charm_skill_groups=(
+            appraisal_group_items if appraisal_group_items is not None else ()
+        ),
+        appraisal_charm_patterns=(
+            appraisal_pattern_items if appraisal_pattern_items is not None else ()
+        ),
     )
 
 
@@ -721,3 +757,265 @@ def test_catalog_package_exports_catalog() -> None:
     from mhwilds_skill_sim.catalog import Catalog as ExportedCatalog
 
     assert ExportedCatalog is Catalog
+
+
+def test_legacy_catalog_defaults_appraisal_rule_fields_to_empty_tuples() -> None:
+    created = Catalog(schema_version=1, equipment=(), decorations=())
+
+    assert created.appraisal_charm_skill_groups == ()
+    assert created.appraisal_charm_patterns == ()
+
+
+def test_catalog_accepts_ordered_appraisal_groups_and_patterns() -> None:
+    skills = (
+        skill_definition("skill:attack-boost", SkillKind.ARMOR),
+        skill_definition("skill:weapon-technique", SkillKind.WEAPON),
+    )
+    groups = (
+        appraisal_skill_group(
+            "appraisal-group:B",
+            (skill("skill:weapon-technique"),),
+        ),
+        appraisal_skill_group(
+            "appraisal-group:A",
+            (skill("skill:attack-boost"),),
+        ),
+    )
+    patterns = (
+        appraisal_pattern(
+            "appraisal-pattern:r8-b-a",
+            ("appraisal-group:B", "appraisal-group:A"),
+            slots=(weapon_slot(), armor_slot()),
+        ),
+        appraisal_pattern(
+            "appraisal-pattern:r7-a",
+            ("appraisal-group:A",),
+            rarity=7,
+            slots=(armor_slot(2),),
+        ),
+    )
+
+    created = catalog(
+        skill_items=skills,
+        appraisal_group_items=groups,
+        appraisal_pattern_items=patterns,
+    )
+
+    assert created.appraisal_charm_skill_groups == groups
+    assert created.appraisal_charm_patterns == patterns
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("appraisal_charm_skill_groups", []),
+        ("appraisal_charm_skill_groups", set()),
+        ("appraisal_charm_patterns", []),
+        ("appraisal_charm_patterns", set()),
+    ],
+)
+def test_catalog_rejects_non_tuple_appraisal_rule_fields(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    values = {
+        "schema_version": 1,
+        "equipment": (),
+        "decorations": (),
+        field_name: invalid_value,
+    }
+
+    with pytest.raises(TypeError, match=field_name):
+        Catalog(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["appraisal_charm_skill_groups", "appraisal_charm_patterns"],
+)
+def test_catalog_rejects_appraisal_rule_tuple_subclasses(field_name: str) -> None:
+    class RuleTuple(tuple[object, ...]):
+        pass
+
+    values = {
+        "schema_version": 1,
+        "equipment": (),
+        "decorations": (),
+        field_name: RuleTuple(),
+    }
+
+    with pytest.raises(TypeError, match=field_name):
+        Catalog(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("appraisal_charm_skill_groups", "group"),
+        ("appraisal_charm_skill_groups", None),
+        ("appraisal_charm_patterns", "pattern"),
+        ("appraisal_charm_patterns", None),
+    ],
+)
+def test_catalog_rejects_invalid_appraisal_rule_items(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    values = {
+        "schema_version": 1,
+        "equipment": (),
+        "decorations": (),
+        field_name: (invalid_value,),
+    }
+
+    with pytest.raises(TypeError, match=field_name):
+        Catalog(**values)  # type: ignore[arg-type]
+
+
+def test_catalog_rejects_duplicate_appraisal_group_ids() -> None:
+    groups = (
+        appraisal_skill_group(),
+        appraisal_skill_group(skills=(skill("skill:critical-eye"),)),
+    )
+
+    with pytest.raises(ValueError, match="appraisal_charm_skill_groups"):
+        catalog(appraisal_group_items=groups)
+
+
+def test_catalog_rejects_duplicate_appraisal_pattern_ids() -> None:
+    groups = (appraisal_skill_group(),)
+    patterns = (
+        appraisal_pattern(),
+        appraisal_pattern(skill_group_ids=("appraisal-group:A",) * 2),
+    )
+
+    with pytest.raises(ValueError, match="appraisal_charm_patterns"):
+        catalog(
+            skill_items=(skill_definition(),),
+            appraisal_group_items=groups,
+            appraisal_pattern_items=patterns,
+        )
+
+
+@pytest.mark.parametrize("kind", [SkillKind.ARMOR, SkillKind.WEAPON])
+def test_catalog_accepts_appraisal_group_armor_and_weapon_skill_references(
+    kind: SkillKind,
+) -> None:
+    skill_id = f"skill:{kind.value}-technique"
+    group = appraisal_skill_group(skills=(skill(skill_id),))
+
+    created = catalog(
+        skill_items=(skill_definition(skill_id, kind),),
+        appraisal_group_items=(group,),
+    )
+
+    assert created.appraisal_charm_skill_groups == (group,)
+
+
+def test_catalog_rejects_missing_appraisal_group_skill_reference() -> None:
+    group = appraisal_skill_group(skills=(skill("skill:missing"),))
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(appraisal_group_items=(group,))
+
+    assert "appraisal_charm_skill_groups" in str(exc_info.value)
+    assert "existing" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "invalid_skill",
+    [series_skill_definition(), group_skill_definition()],
+)
+def test_catalog_rejects_appraisal_group_bonus_skill_kinds(
+    invalid_skill: SkillDefinition,
+) -> None:
+    group = appraisal_skill_group(skills=(skill(invalid_skill.skill_id),))
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(
+            skill_items=(invalid_skill,),
+            appraisal_group_items=(group,),
+        )
+
+    assert "appraisal_charm_skill_groups" in str(exc_info.value)
+    assert "armor or weapon" in str(exc_info.value)
+
+
+def test_catalog_rejects_appraisal_group_level_above_maximum_rank() -> None:
+    group = appraisal_skill_group(skills=(skill(level=2),))
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(
+            skill_items=(skill_definition(),),
+            appraisal_group_items=(group,),
+        )
+
+    assert "appraisal_charm_skill_groups" in str(exc_info.value)
+    assert "level" in str(exc_info.value)
+    assert "maximum" in str(exc_info.value)
+
+
+def test_catalog_accepts_existing_and_repeated_pattern_group_references() -> None:
+    group = appraisal_skill_group()
+    charm_pattern = appraisal_pattern(
+        skill_group_ids=("appraisal-group:A", "appraisal-group:A"),
+    )
+
+    created = catalog(
+        skill_items=(skill_definition(),),
+        appraisal_group_items=(group,),
+        appraisal_pattern_items=(charm_pattern,),
+    )
+
+    assert created.appraisal_charm_patterns[0].skill_group_ids == (
+        "appraisal-group:A",
+        "appraisal-group:A",
+    )
+
+
+def test_catalog_rejects_missing_pattern_group_reference() -> None:
+    charm_pattern = appraisal_pattern(skill_group_ids=("appraisal-group:missing",))
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(appraisal_pattern_items=(charm_pattern,))
+
+    assert "appraisal_charm_patterns" in str(exc_info.value)
+    assert "skill_group_ids" in str(exc_info.value)
+
+
+def test_catalog_allows_unused_appraisal_group_and_unused_skill() -> None:
+    metadata = (
+        skill_definition("skill:attack-boost"),
+        skill_definition("skill:unused"),
+    )
+    group = appraisal_skill_group()
+
+    created = catalog(
+        skill_items=metadata,
+        appraisal_group_items=(group,),
+        appraisal_pattern_items=(),
+    )
+
+    assert created.skills == metadata
+    assert created.appraisal_charm_skill_groups == (group,)
+    assert created.appraisal_charm_patterns == ()
+
+
+def test_catalog_with_appraisal_rules_is_frozen_hashable_and_value_based() -> None:
+    groups = (appraisal_skill_group(),)
+    patterns = (appraisal_pattern(),)
+    first = catalog(
+        skill_items=(skill_definition(),),
+        appraisal_group_items=groups,
+        appraisal_pattern_items=patterns,
+    )
+    second = catalog(
+        skill_items=(skill_definition(),),
+        appraisal_group_items=groups,
+        appraisal_pattern_items=patterns,
+    )
+
+    assert first == second
+    assert hash(first) == hash(second)
+    with pytest.raises(FrozenInstanceError):
+        first.appraisal_charm_patterns = ()

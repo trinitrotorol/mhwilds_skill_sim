@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition
 from mhwilds_skill_sim.domain.skill import SkillDefinition, SkillKind
@@ -15,6 +19,8 @@ class Catalog:
     equipment: tuple[EquipmentDefinition, ...]
     decorations: tuple[DecorationDefinition, ...]
     skills: tuple[SkillDefinition, ...] = ()
+    appraisal_charm_skill_groups: tuple[AppraisalCharmSkillGroupDefinition, ...] = ()
+    appraisal_charm_patterns: tuple[AppraisalCharmPatternDefinition, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.schema_version) is not int:
@@ -62,6 +68,42 @@ class Catalog:
 
             seen_skill_ids.add(skill.skill_id)
 
+        if type(self.appraisal_charm_skill_groups) is not tuple:
+            raise TypeError("appraisal_charm_skill_groups must be tuple")
+
+        seen_appraisal_group_ids: set[str] = set()
+        for group in self.appraisal_charm_skill_groups:
+            if not isinstance(group, AppraisalCharmSkillGroupDefinition):
+                raise TypeError(
+                    "appraisal_charm_skill_groups must contain only "
+                    "AppraisalCharmSkillGroupDefinition"
+                )
+
+            if group.group_id in seen_appraisal_group_ids:
+                raise ValueError(
+                    "appraisal_charm_skill_groups must not contain duplicate group_id"
+                )
+
+            seen_appraisal_group_ids.add(group.group_id)
+
+        if type(self.appraisal_charm_patterns) is not tuple:
+            raise TypeError("appraisal_charm_patterns must be tuple")
+
+        seen_appraisal_pattern_ids: set[str] = set()
+        for pattern in self.appraisal_charm_patterns:
+            if not isinstance(pattern, AppraisalCharmPatternDefinition):
+                raise TypeError(
+                    "appraisal_charm_patterns must contain only "
+                    "AppraisalCharmPatternDefinition"
+                )
+
+            if pattern.pattern_id in seen_appraisal_pattern_ids:
+                raise ValueError(
+                    "appraisal_charm_patterns must not contain duplicate pattern_id"
+                )
+
+            seen_appraisal_pattern_ids.add(pattern.pattern_id)
+
         skills_by_id = {skill.skill_id: skill for skill in self.skills}
         has_series_skill = any(skill.kind is SkillKind.SERIES for skill in self.skills)
         has_group_skill = any(skill.kind is SkillKind.GROUP for skill in self.skills)
@@ -97,3 +139,35 @@ class Catalog:
                 raise ValueError(
                     "equipment allows_group_skill_assignment requires a group skill"
                 )
+
+        for group in self.appraisal_charm_skill_groups:
+            for contribution in group.skills:
+                referenced_skill = skills_by_id.get(contribution.skill_id)
+                if referenced_skill is None:
+                    raise ValueError(
+                        "appraisal_charm_skill_groups skills must reference an "
+                        "existing skill"
+                    )
+
+                if referenced_skill.kind not in (SkillKind.ARMOR, SkillKind.WEAPON):
+                    raise ValueError(
+                        "appraisal_charm_skill_groups skills must reference an "
+                        "armor or weapon skill"
+                    )
+
+                if contribution.level > referenced_skill.ranks[-1].level:
+                    raise ValueError(
+                        "appraisal_charm_skill_groups skill level must not exceed "
+                        "the referenced skill maximum rank"
+                    )
+
+        appraisal_groups_by_id = {
+            group.group_id: group for group in self.appraisal_charm_skill_groups
+        }
+        for pattern in self.appraisal_charm_patterns:
+            for group_id in pattern.skill_group_ids:
+                if group_id not in appraisal_groups_by_id:
+                    raise ValueError(
+                        "appraisal_charm_patterns skill_group_ids must reference "
+                        "an existing appraisal charm skill group"
+                    )

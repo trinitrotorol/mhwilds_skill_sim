@@ -1,5 +1,9 @@
 """Domain value objects and rules."""
 
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.bonus import (
     calculate_equipment_bonus_skill_contributions,
 )
@@ -19,6 +23,8 @@ from mhwilds_skill_sim.domain.slot import (
 )
 
 __all__ = [
+    "AppraisalCharmPatternDefinition",
+    "AppraisalCharmSkillGroupDefinition",
     "DecorationDefinition",
     "DecorationKind",
     "DecorationSlot",

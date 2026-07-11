@@ -45,6 +45,69 @@ SKILL_CONTRIBUTION_KEYS = {"skill_id", "level"}
 SKILL_DEFINITION_KEYS = {"skill_id", "kind", "ranks"}
 SKILL_RANK_KEYS = {"level", "required_pieces"}
 SLOT_KEYS = {"kind", "level"}
+APPRAISAL_GROUP_KEYS = {"group_id", "skills"}
+APPRAISAL_PATTERN_KEYS = {"pattern_id", "rarity", "skill_group_ids", "slots"}
+EXPECTED_APPRAISAL_GROUPS = [
+    {
+        "group_id": "fixture:appraisal-group:A",
+        "skills": [
+            {"skill_id": "skill:attack-boost", "level": 1},
+            {"skill_id": "skill:critical-eye", "level": 1},
+        ],
+    },
+    {
+        "group_id": "fixture:appraisal-group:B",
+        "skills": [
+            {"skill_id": "skill:attack-boost", "level": 2},
+            {"skill_id": "skill:fixture-weapon-technique", "level": 1},
+        ],
+    },
+    {
+        "group_id": "fixture:appraisal-group:J",
+        "skills": [
+            {"skill_id": "skill:weakness-exploit", "level": 1},
+        ],
+    },
+]
+EXPECTED_APPRAISAL_PATTERNS = [
+    {
+        "pattern_id": "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1",
+        "rarity": 8,
+        "skill_group_ids": [
+            "fixture:appraisal-group:B",
+            "fixture:appraisal-group:A",
+            "fixture:appraisal-group:J",
+        ],
+        "slots": [
+            {"kind": "weapon", "level": 1},
+            {"kind": "armor", "level": 1},
+            {"kind": "armor", "level": 1},
+        ],
+    },
+    {
+        "pattern_id": "fixture:appraisal-pattern:r8-b-j-w1-a1",
+        "rarity": 8,
+        "skill_group_ids": [
+            "fixture:appraisal-group:B",
+            "fixture:appraisal-group:J",
+        ],
+        "slots": [
+            {"kind": "weapon", "level": 1},
+            {"kind": "armor", "level": 1},
+        ],
+    },
+    {
+        "pattern_id": "fixture:appraisal-pattern:r7-a-j-a2",
+        "rarity": 7,
+        "skill_group_ids": [
+            "fixture:appraisal-group:A",
+            "fixture:appraisal-group:J",
+        ],
+        "slots": [
+            {"kind": "armor", "level": 2},
+        ],
+    },
+]
 
 
 def load_fixture() -> dict:
@@ -90,7 +153,14 @@ def test_fixture_loads_as_utf8_json() -> None:
 def test_top_level_keys_and_schema_version() -> None:
     data = load_fixture()
 
-    assert list(data) == ["schema_version", "skills", "equipment", "decorations"]
+    assert list(data) == [
+        "schema_version",
+        "skills",
+        "appraisal_charm_skill_groups",
+        "appraisal_charm_patterns",
+        "equipment",
+        "decorations",
+    ]
     assert type(data["schema_version"]) is int
     assert data["schema_version"] == 1
 
@@ -99,6 +169,8 @@ def test_catalog_counts() -> None:
     data = load_fixture()
 
     assert len(data["skills"]) == 6
+    assert len(data["appraisal_charm_skill_groups"]) == 3
+    assert len(data["appraisal_charm_patterns"]) == 3
     assert len(data["equipment"]) == 9
     assert len(data["decorations"]) == 5
 
@@ -402,3 +474,102 @@ def test_all_levels_are_strict_positive_ints_and_not_bool() -> None:
     for level in levels:
         assert type(level) is int
         assert level > 0
+
+
+def test_appraisal_rule_ids_are_unique() -> None:
+    data = load_fixture()
+    group_ids = [group["group_id"] for group in data["appraisal_charm_skill_groups"]]
+    pattern_ids = [
+        pattern["pattern_id"] for pattern in data["appraisal_charm_patterns"]
+    ]
+
+    assert len(group_ids) == len(set(group_ids)) == 3
+    assert len(pattern_ids) == len(set(pattern_ids)) == 3
+
+
+def test_appraisal_group_objects_match_strict_shape() -> None:
+    data = load_fixture()
+
+    for group in data["appraisal_charm_skill_groups"]:
+        assert set(group) == APPRAISAL_GROUP_KEYS
+        assert type(group["group_id"]) is str
+        assert group["group_id"]
+        assert group["group_id"] == group["group_id"].strip()
+        assert type(group["skills"]) is list
+        assert group["skills"]
+        for option in group["skills"]:
+            assert set(option) == SKILL_CONTRIBUTION_KEYS
+
+
+def test_appraisal_group_skills_reference_valid_roll_kinds_and_levels() -> None:
+    data = load_fixture()
+    skills_by_id = {skill["skill_id"]: skill for skill in data["skills"]}
+
+    for group in data["appraisal_charm_skill_groups"]:
+        option_ids = [option["skill_id"] for option in group["skills"]]
+        assert len(option_ids) == len(set(option_ids))
+        for option in group["skills"]:
+            assert option["skill_id"] in skills_by_id
+            definition = skills_by_id[option["skill_id"]]
+            assert definition["kind"] in {"armor", "weapon"}
+            assert type(option["level"]) is int
+            assert option["level"] > 0
+            assert option["level"] <= max(rank["level"] for rank in definition["ranks"])
+
+
+def test_appraisal_pattern_objects_match_strict_shape_and_references() -> None:
+    data = load_fixture()
+    group_ids = {group["group_id"] for group in data["appraisal_charm_skill_groups"]}
+
+    for pattern in data["appraisal_charm_patterns"]:
+        assert set(pattern) == APPRAISAL_PATTERN_KEYS
+        assert type(pattern["pattern_id"]) is str
+        assert pattern["pattern_id"]
+        assert pattern["pattern_id"] == pattern["pattern_id"].strip()
+        assert type(pattern["rarity"]) is int
+        assert pattern["rarity"] > 0
+        assert type(pattern["skill_group_ids"]) is list
+        assert 1 <= len(pattern["skill_group_ids"]) <= 3
+        for group_id in pattern["skill_group_ids"]:
+            assert type(group_id) is str
+            assert group_id in group_ids
+
+
+def test_appraisal_pattern_slots_match_shape_limits_and_order() -> None:
+    data = load_fixture()
+
+    for pattern in data["appraisal_charm_patterns"]:
+        assert type(pattern["slots"]) is list
+        assert len(pattern["slots"]) <= 4
+        for slot in pattern["slots"]:
+            assert set(slot) == SLOT_KEYS
+            assert slot["kind"] in {"weapon", "armor"}
+            assert type(slot["level"]) is int
+            assert slot["level"] > 0
+
+        weapon_indices = [
+            index
+            for index, slot in enumerate(pattern["slots"])
+            if slot["kind"] == "weapon"
+        ]
+        armor_indices = [
+            index
+            for index, slot in enumerate(pattern["slots"])
+            if slot["kind"] == "armor"
+        ]
+        assert len(weapon_indices) <= 1
+        assert len(armor_indices) <= 3
+        if weapon_indices and armor_indices:
+            assert weapon_indices[0] < min(armor_indices)
+
+
+def test_exact_synthetic_appraisal_groups_match_specification() -> None:
+    data = load_fixture()
+
+    assert data["appraisal_charm_skill_groups"] == EXPECTED_APPRAISAL_GROUPS
+
+
+def test_exact_synthetic_appraisal_patterns_match_specification() -> None:
+    data = load_fixture()
+
+    assert data["appraisal_charm_patterns"] == EXPECTED_APPRAISAL_PATTERNS

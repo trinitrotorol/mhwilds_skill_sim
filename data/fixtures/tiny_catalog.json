@@ -90,6 +90,100 @@
       ]
     }
   ],
+  "appraisal_charm_skill_groups": [
+    {
+      "group_id": "fixture:appraisal-group:A",
+      "skills": [
+        {
+          "skill_id": "skill:attack-boost",
+          "level": 1
+        },
+        {
+          "skill_id": "skill:critical-eye",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "group_id": "fixture:appraisal-group:B",
+      "skills": [
+        {
+          "skill_id": "skill:attack-boost",
+          "level": 2
+        },
+        {
+          "skill_id": "skill:fixture-weapon-technique",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "group_id": "fixture:appraisal-group:J",
+      "skills": [
+        {
+          "skill_id": "skill:weakness-exploit",
+          "level": 1
+        }
+      ]
+    }
+  ],
+  "appraisal_charm_patterns": [
+    {
+      "pattern_id": "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1",
+      "rarity": 8,
+      "skill_group_ids": [
+        "fixture:appraisal-group:B",
+        "fixture:appraisal-group:A",
+        "fixture:appraisal-group:J"
+      ],
+      "slots": [
+        {
+          "kind": "weapon",
+          "level": 1
+        },
+        {
+          "kind": "armor",
+          "level": 1
+        },
+        {
+          "kind": "armor",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "pattern_id": "fixture:appraisal-pattern:r8-b-j-w1-a1",
+      "rarity": 8,
+      "skill_group_ids": [
+        "fixture:appraisal-group:B",
+        "fixture:appraisal-group:J"
+      ],
+      "slots": [
+        {
+          "kind": "weapon",
+          "level": 1
+        },
+        {
+          "kind": "armor",
+          "level": 1
+        }
+      ]
+    },
+    {
+      "pattern_id": "fixture:appraisal-pattern:r7-a-j-a2",
+      "rarity": 7,
+      "skill_group_ids": [
+        "fixture:appraisal-group:A",
+        "fixture:appraisal-group:J"
+      ],
+      "slots": [
+        {
+          "kind": "armor",
+          "level": 2
+        }
+      ]
+    }
+  ],
   "equipment": [
     {
       "equipment_id": "fixture:weapon:training-blade",

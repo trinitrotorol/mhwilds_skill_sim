@@ -10,6 +10,8 @@ import pytest
 
 from mhwilds_skill_sim.catalog import Catalog
 from mhwilds_skill_sim.catalog.decoder import (
+    decode_appraisal_charm_pattern_definition,
+    decode_appraisal_charm_skill_group_definition,
     decode_catalog,
     decode_decoration_definition,
     decode_decoration_slot,
@@ -19,6 +21,10 @@ from mhwilds_skill_sim.catalog.decoder import (
     decode_skill_rank_definition,
 )
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import (
@@ -121,6 +127,38 @@ def group_skill_definition_value(
         kind="group",
         ranks=[skill_rank_value(1, 3)],
     )
+
+
+def appraisal_skill_group_value(
+    group_id: object = "fixture:appraisal-group:A",
+    skills: object = ABSENT,
+) -> dict[str, object]:
+    return {
+        "group_id": group_id,
+        "skills": (
+            [{"skill_id": "skill:attack-boost", "level": 1}]
+            if skills is ABSENT
+            else skills
+        ),
+    }
+
+
+def appraisal_pattern_value(
+    pattern_id: object = "fixture:appraisal-pattern:r8-a",
+    rarity: object = 8,
+    skill_group_ids: object = ABSENT,
+    slots: object = ABSENT,
+) -> dict[str, object]:
+    return {
+        "pattern_id": pattern_id,
+        "rarity": rarity,
+        "skill_group_ids": (
+            ["fixture:appraisal-group:A"]
+            if skill_group_ids is ABSENT
+            else skill_group_ids
+        ),
+        "slots": [] if slots is ABSENT else slots,
+    }
 
 
 def alternate_decoration_value(
@@ -1407,3 +1445,680 @@ def test_decode_catalog_wraps_duplicate_skill_id_error_at_root() -> None:
     assert exc_info.value.path == "$.catalog"
     assert "skills" in exc_info.value.detail
     assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_decode_appraisal_skill_group_converts_valid_ordered_object() -> None:
+    value = appraisal_skill_group_value(
+        group_id="fixture:appraisal-group:B",
+        skills=[
+            {"skill_id": "skill:attack-boost", "level": 2},
+            {"skill_id": "skill:weapon-technique", "level": 1},
+        ],
+    )
+
+    decoded = decode_appraisal_charm_skill_group_definition(value=value)
+
+    assert decoded == AppraisalCharmSkillGroupDefinition(
+        group_id="fixture:appraisal-group:B",
+        skills=(
+            SkillContribution("skill:attack-boost", 2),
+            SkillContribution("skill:weapon-technique", 1),
+        ),
+    )
+
+
+@pytest.mark.parametrize("value", [None, "group", [], ()])
+def test_decode_appraisal_skill_group_rejects_non_dict(value: object) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=value,
+            path="$.group",
+        )
+
+    assert exc_info.value.path == "$.group"
+    assert "object" in exc_info.value.detail
+
+
+def test_decode_appraisal_skill_group_rejects_dict_subclass() -> None:
+    class GroupDict(dict[str, object]):
+        pass
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=GroupDict(appraisal_skill_group_value()),
+            path="$.group",
+        )
+
+    assert exc_info.value.path == "$.group"
+    assert "object" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_fragments"),
+    [
+        ({"skills": []}, ("group_id",)),
+        ({"group_id": "fixture:appraisal-group:A"}, ("skills",)),
+        (
+            dict(appraisal_skill_group_value(), extra=True),
+            ("extra",),
+        ),
+        ({}, ("group_id", "skills")),
+    ],
+)
+def test_decode_appraisal_skill_group_rejects_invalid_shape(
+    value: dict[object, object],
+    expected_fragments: tuple[str, ...],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=value,
+            path="$.group",
+        )
+
+    assert exc_info.value.path == "$.group"
+    for fragment in expected_fragments:
+        assert fragment in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "skills",
+    [
+        ({"skill_id": "skill:attack-boost", "level": 1},),
+        {"skill_id": "skill:attack-boost", "level": 1},
+        skills_generator(),
+        None,
+    ],
+)
+def test_decode_appraisal_skill_group_rejects_non_list_skills(
+    skills: object,
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=appraisal_skill_group_value(skills=skills),
+            path="$.group",
+        )
+
+    assert exc_info.value.path == "$.group.skills"
+    assert "skills" in exc_info.value.detail
+
+
+def test_decode_appraisal_skill_group_rejects_skills_list_subclass() -> None:
+    class SkillList(list[object]):
+        pass
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=appraisal_skill_group_value(
+                skills=SkillList([{"skill_id": "skill:attack-boost", "level": 1}])
+            ),
+            path="$.group",
+        )
+
+    assert exc_info.value.path == "$.group.skills"
+
+
+def test_decode_appraisal_skill_group_rejects_empty_skills() -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=appraisal_skill_group_value(skills=[]),
+            path="$.group",
+        )
+
+    assert exc_info.value.path == "$.group.skills"
+    assert "empty" in exc_info.value.detail
+
+
+def test_decode_appraisal_skill_group_preserves_nested_contribution_path() -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=appraisal_skill_group_value(
+                skills=[
+                    {"skill_id": "skill:attack-boost", "level": 1},
+                    {"skill_id": "skill:critical-eye", "level": 0},
+                ]
+            ),
+            path="$.catalog.appraisal_charm_skill_groups[2]",
+        )
+
+    assert exc_info.value.path == "$.catalog.appraisal_charm_skill_groups[2].skills[1]"
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("group_id", "expected_cause"),
+    [
+        (None, TypeError),
+        (1, TypeError),
+        ("", ValueError),
+        (" group:A", ValueError),
+    ],
+)
+def test_decode_appraisal_skill_group_wraps_identifier_errors(
+    group_id: object,
+    expected_cause: type[Exception],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=appraisal_skill_group_value(group_id=group_id),
+            path="$.group",
+        )
+
+    assert exc_info.value.path == "$.group"
+    assert "group_id" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+def test_decode_appraisal_skill_group_wraps_duplicate_skill_error() -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_skill_group_definition(
+            value=appraisal_skill_group_value(
+                skills=[
+                    {"skill_id": "skill:attack-boost", "level": 1},
+                    {"skill_id": "skill:attack-boost", "level": 2},
+                ]
+            ),
+            path="$.group",
+        )
+
+    assert exc_info.value.path == "$.group"
+    assert "skills" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_decode_appraisal_pattern_converts_valid_atomic_object() -> None:
+    value = appraisal_pattern_value(
+        pattern_id="fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1",
+        skill_group_ids=[
+            "fixture:appraisal-group:B",
+            "fixture:appraisal-group:A",
+            "fixture:appraisal-group:J",
+        ],
+        slots=[
+            {"kind": "weapon", "level": 1},
+            {"kind": "armor", "level": 1},
+            {"kind": "armor", "level": 1},
+        ],
+    )
+
+    decoded = decode_appraisal_charm_pattern_definition(value=value)
+
+    assert decoded == AppraisalCharmPatternDefinition(
+        pattern_id="fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1",
+        rarity=8,
+        skill_group_ids=(
+            "fixture:appraisal-group:B",
+            "fixture:appraisal-group:A",
+            "fixture:appraisal-group:J",
+        ),
+        slots=(
+            DecorationSlot(DecorationKind.WEAPON, 1),
+            DecorationSlot(DecorationKind.ARMOR, 1),
+            DecorationSlot(DecorationKind.ARMOR, 1),
+        ),
+    )
+
+
+@pytest.mark.parametrize("value", [None, "pattern", [], ()])
+def test_decode_appraisal_pattern_rejects_non_dict(value: object) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=value,
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == "$.pattern"
+    assert "object" in exc_info.value.detail
+
+
+def test_decode_appraisal_pattern_rejects_dict_subclass() -> None:
+    class PatternDict(dict[str, object]):
+        pass
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=PatternDict(appraisal_pattern_value()),
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == "$.pattern"
+    assert "object" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_fragments"),
+    [
+        (
+            {"rarity": 8, "skill_group_ids": ["group:A"], "slots": []},
+            ("pattern_id",),
+        ),
+        (
+            {
+                "pattern_id": "pattern:A",
+                "skill_group_ids": ["group:A"],
+                "slots": [],
+            },
+            ("rarity",),
+        ),
+        (
+            {"pattern_id": "pattern:A", "rarity": 8, "slots": []},
+            ("skill_group_ids",),
+        ),
+        (
+            {
+                "pattern_id": "pattern:A",
+                "rarity": 8,
+                "skill_group_ids": ["group:A"],
+            },
+            ("slots",),
+        ),
+        (dict(appraisal_pattern_value(), extra=True), ("extra",)),
+        ({}, ("pattern_id", "rarity", "skill_group_ids", "slots")),
+    ],
+)
+def test_decode_appraisal_pattern_rejects_invalid_shape(
+    value: dict[object, object],
+    expected_fragments: tuple[str, ...],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=value,
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == "$.pattern"
+    for fragment in expected_fragments:
+        assert fragment in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("skill_group_ids", ("fixture:appraisal-group:A",)),
+        ("skill_group_ids", {"fixture:appraisal-group:A"}),
+        ("skill_group_ids", group_skill_definition_value()),
+        ("skill_group_ids", None),
+        ("slots", ({"kind": "armor", "level": 1},)),
+        ("slots", {"kind": "armor", "level": 1}),
+        ("slots", skills_generator()),
+        ("slots", None),
+    ],
+)
+def test_decode_appraisal_pattern_rejects_non_list_fields(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    value = appraisal_pattern_value()
+    value[field_name] = invalid_value
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=value,
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == f"$.pattern.{field_name}"
+    assert field_name in exc_info.value.detail
+
+
+@pytest.mark.parametrize("field_name", ["skill_group_ids", "slots"])
+def test_decode_appraisal_pattern_rejects_list_subclasses(field_name: str) -> None:
+    class FieldList(list[object]):
+        pass
+
+    value = appraisal_pattern_value()
+    value[field_name] = FieldList(value[field_name])  # type: ignore[arg-type]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=value,
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == f"$.pattern.{field_name}"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value", "expected_cause"),
+    [
+        ("pattern_id", "", ValueError),
+        ("pattern_id", 1, TypeError),
+        ("rarity", 0, ValueError),
+        ("rarity", True, TypeError),
+    ],
+)
+def test_decode_appraisal_pattern_wraps_identifier_and_rarity_errors(
+    field_name: str,
+    invalid_value: object,
+    expected_cause: type[Exception],
+) -> None:
+    value = appraisal_pattern_value()
+    value[field_name] = invalid_value
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=value,
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == "$.pattern"
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+@pytest.mark.parametrize(
+    "skill_group_ids",
+    [
+        [],
+        ["group:A", "group:B", "group:C", "group:D"],
+    ],
+)
+def test_decode_appraisal_pattern_wraps_group_count_errors(
+    skill_group_ids: list[str],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=appraisal_pattern_value(skill_group_ids=skill_group_ids),
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == "$.pattern"
+    assert "skill_group_ids" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("invalid_group_id", "expected_cause"),
+    [
+        (None, TypeError),
+        (1, TypeError),
+        (True, TypeError),
+        ("", ValueError),
+        (" group:A", ValueError),
+    ],
+)
+def test_decode_appraisal_pattern_wraps_invalid_group_id_values(
+    invalid_group_id: object,
+    expected_cause: type[Exception],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=appraisal_pattern_value(skill_group_ids=[invalid_group_id]),
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == "$.pattern"
+    assert "skill_group_ids" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+def test_decode_appraisal_pattern_preserves_nested_slot_error_path() -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=appraisal_pattern_value(
+                slots=[
+                    {"kind": "weapon", "level": 1},
+                    {"kind": "armor", "level": 0},
+                ]
+            ),
+            path="$.catalog.appraisal_charm_patterns[1]",
+        )
+
+    assert exc_info.value.path == "$.catalog.appraisal_charm_patterns[1].slots[1]"
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_decode_appraisal_pattern_wraps_slot_layout_domain_error() -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_appraisal_charm_pattern_definition(
+            value=appraisal_pattern_value(
+                slots=[
+                    {"kind": "armor", "level": 1},
+                    {"kind": "weapon", "level": 1},
+                ]
+            ),
+            path="$.pattern",
+        )
+
+    assert exc_info.value.path == "$.pattern"
+    assert "slots" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_appraisal_decoders_are_keyword_only() -> None:
+    for decoder in (
+        decode_appraisal_charm_skill_group_definition,
+        decode_appraisal_charm_pattern_definition,
+    ):
+        signature = inspect.signature(decoder)
+
+        assert signature.parameters["value"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters["path"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_decode_catalog_defaults_appraisal_rule_fields_to_empty_tuples() -> None:
+    decoded = decode_catalog(value=catalog_value())
+
+    assert decoded.appraisal_charm_skill_groups == ()
+    assert decoded.appraisal_charm_patterns == ()
+
+
+def test_decode_catalog_accepts_present_empty_appraisal_rule_lists() -> None:
+    value = catalog_value()
+    value["appraisal_charm_skill_groups"] = []
+    value["appraisal_charm_patterns"] = []
+
+    decoded = decode_catalog(value=value)
+
+    assert decoded.appraisal_charm_skill_groups == ()
+    assert decoded.appraisal_charm_patterns == ()
+
+
+def test_decode_catalog_preserves_populated_appraisal_rule_order() -> None:
+    value = catalog_value()
+    value["skills"] = [
+        skill_definition_value("skill:attack-boost", "armor"),
+        skill_definition_value("skill:weapon-technique", "weapon"),
+    ]
+    value["appraisal_charm_skill_groups"] = [
+        appraisal_skill_group_value(
+            "fixture:appraisal-group:B",
+            [{"skill_id": "skill:weapon-technique", "level": 1}],
+        ),
+        appraisal_skill_group_value("fixture:appraisal-group:A"),
+    ]
+    value["appraisal_charm_patterns"] = [
+        appraisal_pattern_value(
+            "fixture:appraisal-pattern:r8-b-a",
+            skill_group_ids=[
+                "fixture:appraisal-group:B",
+                "fixture:appraisal-group:A",
+            ],
+        ),
+        appraisal_pattern_value(
+            "fixture:appraisal-pattern:r7-a",
+            rarity=7,
+        ),
+    ]
+
+    decoded = decode_catalog(value=value)
+
+    assert [group.group_id for group in decoded.appraisal_charm_skill_groups] == [
+        "fixture:appraisal-group:B",
+        "fixture:appraisal-group:A",
+    ]
+    assert [pattern.pattern_id for pattern in decoded.appraisal_charm_patterns] == [
+        "fixture:appraisal-pattern:r8-b-a",
+        "fixture:appraisal-pattern:r7-a",
+    ]
+
+
+def appraisal_group_value_generator() -> Iterator[dict[str, object]]:
+    yield appraisal_skill_group_value()
+
+
+def appraisal_pattern_value_generator() -> Iterator[dict[str, object]]:
+    yield appraisal_pattern_value()
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("appraisal_charm_skill_groups", (appraisal_skill_group_value(),)),
+        ("appraisal_charm_skill_groups", appraisal_skill_group_value()),
+        ("appraisal_charm_skill_groups", appraisal_group_value_generator()),
+        ("appraisal_charm_skill_groups", None),
+        ("appraisal_charm_patterns", (appraisal_pattern_value(),)),
+        ("appraisal_charm_patterns", appraisal_pattern_value()),
+        ("appraisal_charm_patterns", appraisal_pattern_value_generator()),
+        ("appraisal_charm_patterns", None),
+    ],
+)
+def test_decode_catalog_rejects_non_list_appraisal_rule_fields(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    value = catalog_value()
+    value[field_name] = invalid_value
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == f"$.catalog.{field_name}"
+    assert field_name in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("field_name", "item"),
+    [
+        ("appraisal_charm_skill_groups", appraisal_skill_group_value()),
+        ("appraisal_charm_patterns", appraisal_pattern_value()),
+    ],
+)
+def test_decode_catalog_rejects_appraisal_rule_list_subclasses(
+    field_name: str,
+    item: dict[str, object],
+) -> None:
+    class RuleList(list[object]):
+        pass
+
+    value = catalog_value()
+    value[field_name] = RuleList([item])
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == f"$.catalog.{field_name}"
+
+
+def test_decode_catalog_preserves_nested_appraisal_group_error_path() -> None:
+    value = catalog_value()
+    value["appraisal_charm_skill_groups"] = [
+        appraisal_skill_group_value(),
+        appraisal_skill_group_value(skills=[{"skill_id": "skill:test", "level": 0}]),
+    ]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog.appraisal_charm_skill_groups[1].skills[0]"
+    assert_nested_error_not_wrapped(exc_info.value)
+
+
+def test_decode_catalog_preserves_nested_appraisal_pattern_error_path() -> None:
+    value = catalog_value()
+    value["appraisal_charm_patterns"] = [
+        appraisal_pattern_value(
+            slots=[{"kind": "armor", "level": 0}],
+        )
+    ]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog.appraisal_charm_patterns[0].slots[0]"
+    assert_nested_error_not_wrapped(exc_info.value)
+
+
+def test_decode_catalog_wraps_missing_appraisal_skill_reference_at_root() -> None:
+    value = catalog_value()
+    value["appraisal_charm_skill_groups"] = [
+        appraisal_skill_group_value(
+            skills=[{"skill_id": "skill:missing", "level": 1}],
+        )
+    ]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert "appraisal_charm_skill_groups" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(
+    "skill_value",
+    [series_skill_definition_value(), group_skill_definition_value()],
+)
+def test_decode_catalog_wraps_invalid_appraisal_skill_kind_at_root(
+    skill_value: dict[str, object],
+) -> None:
+    value = catalog_value()
+    value["skills"] = [skill_value]
+    value["appraisal_charm_skill_groups"] = [
+        appraisal_skill_group_value(
+            skills=[{"skill_id": skill_value["skill_id"], "level": 1}],
+        )
+    ]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert "appraisal_charm_skill_groups" in exc_info.value.detail
+    assert "armor or weapon" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_decode_catalog_wraps_appraisal_level_above_rank_at_root() -> None:
+    value = catalog_value()
+    value["skills"] = [skill_definition_value()]
+    value["appraisal_charm_skill_groups"] = [
+        appraisal_skill_group_value(
+            skills=[{"skill_id": "skill:attack-boost", "level": 2}],
+        )
+    ]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert "maximum" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_decode_catalog_wraps_missing_pattern_group_at_root() -> None:
+    value = catalog_value()
+    value["appraisal_charm_patterns"] = [
+        appraisal_pattern_value(skill_group_ids=["fixture:appraisal-group:missing"])
+    ]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert "appraisal_charm_patterns" in exc_info.value.detail
+    assert "skill_group_ids" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_appraisal_decoders_are_not_exported_from_catalog_package() -> None:
+    import mhwilds_skill_sim.catalog as catalog_package
+
+    assert not hasattr(
+        catalog_package,
+        "decode_appraisal_charm_skill_group_definition",
+    )
+    assert not hasattr(
+        catalog_package,
+        "decode_appraisal_charm_pattern_definition",
+    )

@@ -15,6 +15,10 @@ from mhwilds_skill_sim.catalog.decoder import (
     decode_skill_contribution,
 )
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import SkillContribution, SkillKind
@@ -399,3 +403,109 @@ def test_catalog_decode_error_still_imports_directly() -> None:
     error = CatalogDecodeError(path="$", detail="invalid object")
 
     assert str(error) == "$: invalid object"
+
+
+def test_load_catalog_reads_appraisal_rule_counts_types_and_order() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    assert len(catalog.appraisal_charm_skill_groups) == 3
+    assert len(catalog.appraisal_charm_patterns) == 3
+    assert all(
+        isinstance(group, AppraisalCharmSkillGroupDefinition)
+        for group in catalog.appraisal_charm_skill_groups
+    )
+    assert all(
+        isinstance(pattern, AppraisalCharmPatternDefinition)
+        for pattern in catalog.appraisal_charm_patterns
+    )
+    assert [group.group_id for group in catalog.appraisal_charm_skill_groups] == [
+        "fixture:appraisal-group:A",
+        "fixture:appraisal-group:B",
+        "fixture:appraisal-group:J",
+    ]
+    assert [pattern.pattern_id for pattern in catalog.appraisal_charm_patterns] == [
+        "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1",
+        "fixture:appraisal-pattern:r8-b-j-w1-a1",
+        "fixture:appraisal-pattern:r7-a-j-a2",
+    ]
+
+
+def test_load_catalog_reads_exact_appraisal_group_options() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    assert [
+        [(option.skill_id, option.level) for option in group.skills]
+        for group in catalog.appraisal_charm_skill_groups
+    ] == [
+        [
+            ("skill:attack-boost", 1),
+            ("skill:critical-eye", 1),
+        ],
+        [
+            ("skill:attack-boost", 2),
+            ("skill:fixture-weapon-technique", 1),
+        ],
+        [("skill:weakness-exploit", 1)],
+    ]
+
+
+def test_load_catalog_reads_exact_appraisal_pattern_metadata() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    assert [pattern.rarity for pattern in catalog.appraisal_charm_patterns] == [8, 8, 7]
+    assert [
+        pattern.skill_group_ids for pattern in catalog.appraisal_charm_patterns
+    ] == [
+        (
+            "fixture:appraisal-group:B",
+            "fixture:appraisal-group:A",
+            "fixture:appraisal-group:J",
+        ),
+        (
+            "fixture:appraisal-group:B",
+            "fixture:appraisal-group:J",
+        ),
+        (
+            "fixture:appraisal-group:A",
+            "fixture:appraisal-group:J",
+        ),
+    ]
+
+
+def test_load_catalog_reads_exact_appraisal_pattern_slots() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    assert [
+        [(slot.kind, slot.level) for slot in pattern.slots]
+        for pattern in catalog.appraisal_charm_patterns
+    ] == [
+        [
+            (DecorationKind.WEAPON, 1),
+            (DecorationKind.ARMOR, 1),
+            (DecorationKind.ARMOR, 1),
+        ],
+        [
+            (DecorationKind.WEAPON, 1),
+            (DecorationKind.ARMOR, 1),
+        ],
+        [(DecorationKind.ARMOR, 2)],
+    ]
+
+
+def test_load_catalog_appraisal_references_resolve_to_valid_skills_and_groups() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+    skills_by_id = {skill.skill_id: skill for skill in catalog.skills}
+    groups_by_id = {
+        group.group_id: group for group in catalog.appraisal_charm_skill_groups
+    }
+
+    for group in catalog.appraisal_charm_skill_groups:
+        for option in group.skills:
+            assert option.skill_id in skills_by_id
+            definition = skills_by_id[option.skill_id]
+            assert definition.kind in (SkillKind.ARMOR, SkillKind.WEAPON)
+            assert option.level <= definition.ranks[-1].level
+
+    for pattern in catalog.appraisal_charm_patterns:
+        for group_id in pattern.skill_group_ids:
+            assert group_id in groups_by_id
