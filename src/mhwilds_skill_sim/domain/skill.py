@@ -37,6 +37,7 @@ class SkillDefinition:
     skill_id: str
     kind: SkillKind
     ranks: tuple[SkillRankDefinition, ...]
+    display_name: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.skill_id) is not str:
@@ -66,6 +67,21 @@ class SkillDefinition:
 
             if rank.level != expected_level:
                 raise ValueError("ranks levels must be ordered as 1, 2, ..., N")
+
+        if self.display_name is not None:
+            if type(self.display_name) is not str:
+                raise TypeError("display_name must be str or None")
+
+            if self.display_name == "":
+                raise ValueError("display_name must not be empty")
+
+            if self.display_name.strip() == "":
+                raise ValueError("display_name must not be blank")
+
+            if self.display_name != self.display_name.strip():
+                raise ValueError(
+                    "display_name must not have leading or trailing whitespace"
+                )
 
         if self.kind in (SkillKind.ARMOR, SkillKind.WEAPON):
             if any(rank.required_pieces is not None for rank in self.ranks):

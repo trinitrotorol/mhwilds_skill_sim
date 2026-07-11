@@ -1,0 +1,70 @@
+[
+  {
+    "gameId": 1001,
+    "name": "攻撃力強化（テスト）",
+    "kind": "armor",
+    "ranks": [
+      {
+        "level": 1,
+        "setPiecesRequired": null,
+        "description": "ignored armor rank 1"
+      },
+      {
+        "level": 2,
+        "setPiecesRequired": null,
+        "description": "ignored armor rank 2"
+      },
+      {
+        "level": 3,
+        "setPiecesRequired": null,
+        "description": "ignored armor rank 3"
+      }
+    ],
+    "description": "ignored armor skill"
+  },
+  {
+    "gameId": -1002,
+    "name": "武器技術（テスト）",
+    "kind": "weapon",
+    "ranks": [
+      {
+        "level": 1,
+        "description": "ignored weapon rank"
+      }
+    ],
+    "icon": "ignored-weapon-icon"
+  },
+  {
+    "gameId": 1003,
+    "name": "シリーズボーナス（テスト）",
+    "kind": "set",
+    "ranks": [
+      {
+        "level": 2,
+        "setPiecesRequired": 4,
+        "description": "ignored set rank 2"
+      },
+      {
+        "level": 1,
+        "setPiecesRequired": 2,
+        "description": "ignored set rank 1"
+      }
+    ],
+    "legacyId": "ignored-set-id"
+  },
+  {
+    "gameId": 1004,
+    "name": "グループボーナス（テスト）",
+    "kind": "group",
+    "ranks": [
+      {
+        "level": 1,
+        "setPiecesRequired": 3,
+        "description": "ignored group rank"
+      }
+    ],
+    "stub": {
+      "ignored": true
+    }
+  }
+]

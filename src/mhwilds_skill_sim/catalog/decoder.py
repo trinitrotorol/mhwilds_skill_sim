@@ -33,7 +33,7 @@ _APPRAISAL_CHARM_PATTERN_KEY_ORDER = (
 )
 _SKILL_RANK_DEFINITION_KEYS = frozenset(("level", "required_pieces"))
 _SKILL_RANK_DEFINITION_KEY_ORDER = ("level", "required_pieces")
-_SKILL_DEFINITION_KEYS = frozenset(("skill_id", "kind", "ranks"))
+_SKILL_DEFINITION_KEYS = frozenset(("skill_id", "kind", "ranks", "display_name"))
 _SKILL_DEFINITION_KEY_ORDER = ("skill_id", "kind", "ranks")
 _DECORATION_SLOT_KEYS = frozenset(("kind", "level"))
 _DECORATION_SLOT_KEY_ORDER = ("kind", "level")
@@ -224,6 +224,7 @@ def decode_skill_definition(
             skill_id=value["skill_id"],
             kind=_decode_skill_kind(value["kind"]),
             ranks=ranks,
+            display_name=value.get("display_name"),
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc

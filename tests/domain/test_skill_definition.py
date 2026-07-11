@@ -26,8 +26,14 @@ def definition(
     skill_id: str = "skill:attack-boost",
     kind: SkillKind = SkillKind.ARMOR,
     ranks: tuple[SkillRankDefinition, ...] = (SkillRankDefinition(1, None),),
+    display_name: str | None = None,
 ) -> SkillDefinition:
-    return SkillDefinition(skill_id=skill_id, kind=kind, ranks=ranks)
+    return SkillDefinition(
+        skill_id=skill_id,
+        kind=kind,
+        ranks=ranks,
+        display_name=display_name,
+    )
 
 
 def rank_generator() -> Iterator[SkillRankDefinition]:
@@ -300,3 +306,88 @@ def test_existing_skill_exports_remain_available() -> None:
     assert aggregate_skill_levels(
         contributions=(SkillContribution("skill:attack-boost", 1),)
     ) == {"skill:attack-boost": 1}
+
+
+def test_skill_definition_display_name_defaults_to_none() -> None:
+    created = SkillDefinition(
+        skill_id="skill:attack-boost",
+        kind=SkillKind.ARMOR,
+        ranks=(rank(),),
+    )
+
+    assert created.display_name is None
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    [
+        "攻撃力強化（テスト）",
+        "Attack Boost (Test)",
+        "Mixed CASE: Internal  Spaces!",
+    ],
+)
+def test_skill_definition_preserves_valid_display_name_exactly(
+    display_name: str,
+) -> None:
+    created = definition(display_name=display_name)
+
+    assert created.display_name == display_name
+
+
+def test_skill_definition_equality_and_hash_include_display_name() -> None:
+    japanese = definition(display_name="攻撃力強化（テスト）")
+    same = definition(display_name="攻撃力強化（テスト）")
+    english = definition(display_name="Attack Boost (Test)")
+    absent = definition()
+
+    assert japanese == same
+    assert hash(japanese) == hash(same)
+    assert japanese != english
+    assert japanese != absent
+
+
+def test_skill_definition_display_name_is_frozen() -> None:
+    created = definition(display_name="攻撃力強化（テスト）")
+
+    with pytest.raises(FrozenInstanceError):
+        created.display_name = "変更"
+
+
+@pytest.mark.parametrize("display_name", ["", " ", "\t\n"])
+def test_skill_definition_rejects_empty_or_blank_display_name(
+    display_name: str,
+) -> None:
+    with pytest.raises(ValueError, match="display_name"):
+        definition(display_name=display_name)
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    [" 攻撃力強化", "\tAttack Boost", "攻撃力強化 ", "Attack Boost\n"],
+)
+def test_skill_definition_rejects_display_name_edge_whitespace(
+    display_name: str,
+) -> None:
+    with pytest.raises(ValueError, match="display_name"):
+        definition(display_name=display_name)
+
+
+@pytest.mark.parametrize("display_name", [True, False, 1, 1.5, (), []])
+def test_skill_definition_rejects_non_string_display_name(
+    display_name: object,
+) -> None:
+    with pytest.raises(TypeError, match="display_name"):
+        SkillDefinition(
+            skill_id="skill:attack-boost",
+            kind=SkillKind.ARMOR,
+            ranks=(rank(),),
+            display_name=display_name,  # type: ignore[arg-type]
+        )
+
+
+def test_skill_definition_rejects_display_name_string_subclass() -> None:
+    class DisplayName(str):
+        pass
+
+    with pytest.raises(TypeError, match="display_name"):
+        definition(display_name=DisplayName("Attack Boost"))

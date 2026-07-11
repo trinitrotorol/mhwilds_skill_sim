@@ -101,12 +101,16 @@ def skill_definition_value(
     skill_id: object = "skill:attack-boost",
     kind: object = "armor",
     ranks: object = None,
+    display_name: object = ABSENT,
 ) -> dict[str, object]:
-    return {
+    value: dict[str, object] = {
         "skill_id": skill_id,
         "kind": kind,
         "ranks": [skill_rank_value()] if ranks is None else ranks,
     }
+    if display_name is not ABSENT:
+        value["display_name"] = display_name
+    return value
 
 
 def series_skill_definition_value(
@@ -2122,3 +2126,114 @@ def test_appraisal_decoders_are_not_exported_from_catalog_package() -> None:
         catalog_package,
         "decode_appraisal_charm_pattern_definition",
     )
+
+
+def test_decode_normalized_skill_without_display_name_remains_valid() -> None:
+    decoded = decode_skill_definition(value=skill_definition_value())
+
+    assert decoded.display_name is None
+
+
+def test_decode_normalized_skill_accepts_explicit_null_display_name() -> None:
+    decoded = decode_skill_definition(
+        value=skill_definition_value(display_name=None),
+    )
+
+    assert decoded.display_name is None
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    ["攻撃力強化（テスト）", "Attack Boost (Test)"],
+)
+def test_decode_normalized_skill_preserves_valid_display_name(
+    display_name: str,
+) -> None:
+    decoded = decode_skill_definition(
+        value=skill_definition_value(display_name=display_name),
+    )
+
+    assert decoded.display_name == display_name
+
+
+def test_decode_normalized_skill_display_name_key_order_is_independent() -> None:
+    value = {
+        "display_name": "攻撃力強化（テスト）",
+        "ranks": [skill_rank_value()],
+        "kind": "armor",
+        "skill_id": "skill:attack-boost",
+    }
+
+    decoded = decode_skill_definition(value=value)
+
+    assert decoded == SkillDefinition(
+        skill_id="skill:attack-boost",
+        kind=SkillKind.ARMOR,
+        ranks=(SkillRankDefinition(1, None),),
+        display_name="攻撃力強化（テスト）",
+    )
+
+
+@pytest.mark.parametrize(
+    ("display_name", "expected_cause"),
+    [
+        (True, TypeError),
+        (1, TypeError),
+        (1.5, TypeError),
+        ("", ValueError),
+        ("   ", ValueError),
+        (" Attack Boost", ValueError),
+        ("Attack Boost ", ValueError),
+    ],
+)
+def test_decode_normalized_skill_wraps_invalid_display_name(
+    display_name: object,
+    expected_cause: type[Exception],
+) -> None:
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(
+            value=skill_definition_value(display_name=display_name),
+            path="$.skills[0]",
+        )
+
+    assert exc_info.value.path == "$.skills[0]"
+    assert "display_name" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+def test_decode_normalized_skill_rejects_display_name_string_subclass() -> None:
+    class DisplayName(str):
+        pass
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(
+            value=skill_definition_value(
+                display_name=DisplayName("Attack Boost"),
+            ),
+            path="$.skills[0]",
+        )
+
+    assert exc_info.value.path == "$.skills[0]"
+    assert "display_name" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, TypeError)
+
+
+def test_decode_normalized_skill_with_display_name_still_rejects_unknown_key() -> None:
+    value = skill_definition_value(display_name="Attack Boost")
+    value["description"] = "must remain upstream-only"
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_skill_definition(value=value, path="$.skills[0]")
+
+    assert exc_info.value.path == "$.skills[0]"
+    assert "description" in exc_info.value.detail
+    assert exc_info.value.__cause__ is None
+
+
+def test_decode_catalog_preserves_normalized_skill_display_name() -> None:
+    value = catalog_value()
+    value["skills"] = [skill_definition_value(display_name="攻撃力強化（テスト）")]
+
+    decoded = decode_catalog(value=value)
+
+    assert decoded.skills[0].display_name == "攻撃力強化（テスト）"
