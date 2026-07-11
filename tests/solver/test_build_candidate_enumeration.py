@@ -6,6 +6,10 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import (
@@ -205,6 +209,45 @@ def group_skill_definition(
     thresholds: tuple[int, ...] = (3,),
 ) -> SkillDefinition:
     return bonus_skill_definition(skill_id, SkillKind.GROUP, thresholds)
+
+
+def normal_skill_definition(
+    skill_id: str = "skill:attack-boost",
+    *,
+    kind: SkillKind = SkillKind.ARMOR,
+    maximum_level: int = 3,
+) -> SkillDefinition:
+    return SkillDefinition(
+        skill_id=skill_id,
+        kind=kind,
+        ranks=tuple(
+            SkillRankDefinition(level=level, required_pieces=None)
+            for level in range(1, maximum_level + 1)
+        ),
+    )
+
+
+def appraisal_skill_group(
+    group_id: str = "appraisal-group:A",
+    skills: tuple[SkillContribution, ...] = (
+        SkillContribution("skill:attack-boost", 1),
+    ),
+) -> AppraisalCharmSkillGroupDefinition:
+    return AppraisalCharmSkillGroupDefinition(group_id=group_id, skills=skills)
+
+
+def appraisal_pattern(
+    pattern_id: str = "appraisal-pattern:r8-a",
+    *,
+    skill_group_ids: tuple[str, ...] = ("appraisal-group:A",),
+    slots: tuple[DecorationSlot, ...] = (),
+) -> AppraisalCharmPatternDefinition:
+    return AppraisalCharmPatternDefinition(
+        pattern_id=pattern_id,
+        rarity=8,
+        skill_group_ids=skill_group_ids,
+        slots=slots,
+    )
 
 
 def two_head_equipment(
@@ -1132,3 +1175,230 @@ def test_does_not_filter_candidates_by_skill_requirements() -> None:
         skill_levels=dict(candidates[0].skill_levels),
         requirements=(SkillRequirement("skill:attack-boost", 2),),
     )
+
+
+def test_appraisal_arguments_are_keyword_only_and_default_to_empty_tuples() -> None:
+    signature = inspect.signature(enumerate_build_candidates)
+
+    for field_name in (
+        "appraisal_charm_skill_groups",
+        "appraisal_charm_patterns",
+    ):
+        assert signature.parameters[field_name].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters[field_name].default == ()
+
+
+def test_generated_charms_are_appended_after_fixed_charms() -> None:
+    groups = (
+        appraisal_skill_group(
+            skills=(
+                skill("skill:attack-boost", 1),
+                skill("skill:critical-eye", 1),
+            )
+        ),
+    )
+
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(charm_id="equipment:charm:fixed"),
+        decorations=(),
+        skill_definitions=(
+            normal_skill_definition("skill:attack-boost"),
+            normal_skill_definition("skill:critical-eye"),
+        ),
+        appraisal_charm_skill_groups=groups,
+        appraisal_charm_patterns=(appraisal_pattern(),),
+    )
+
+    assert [candidate.equipment[-1].equipment_id for candidate in candidates] == [
+        "equipment:charm:fixed",
+        ("generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-1"),
+        ("generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-2"),
+    ]
+
+
+def test_generated_charm_skills_participate_in_build_skill_levels() -> None:
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(),
+        decorations=(),
+        skill_definitions=(normal_skill_definition(maximum_level=3),),
+        appraisal_charm_skill_groups=(
+            appraisal_skill_group(skills=(skill("skill:attack-boost", 3),)),
+        ),
+        appraisal_charm_patterns=(appraisal_pattern(),),
+    )
+
+    generated_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.equipment[-1].equipment_id.startswith("generated:appraisal-charm:")
+    )
+    assert generated_candidate.equipment[-1].part is EquipmentPart.CHARM
+    assert dict(generated_candidate.skill_levels)["skill:attack-boost"] == 3
+
+
+def test_generated_charm_slots_participate_in_decoration_placement() -> None:
+    generated_id = (
+        "generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-1"
+    )
+    decoration = decoration_definition(
+        "decoration:armor",
+        required_slot=armor_slot(1),
+        skills=(skill("skill:critical-eye", 1),),
+    )
+
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(),
+        decorations=(decoration,),
+        skill_definitions=(normal_skill_definition(),),
+        appraisal_charm_skill_groups=(appraisal_skill_group(),),
+        appraisal_charm_patterns=(appraisal_pattern(slots=(armor_slot(1),)),),
+    )
+
+    generated_candidates = tuple(
+        candidate
+        for candidate in candidates
+        if candidate.equipment[-1].equipment_id == generated_id
+    )
+    assert len(generated_candidates) == 2
+    assert [candidate.placements for candidate in generated_candidates] == [
+        (),
+        (placement(generated_id, 0, "decoration:armor"),),
+    ]
+    assert dict(generated_candidates[1].skill_levels)["skill:critical-eye"] == 1
+
+
+def test_artian_expansion_combines_with_fixed_and_generated_charms() -> None:
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(
+            charm_id="equipment:charm:fixed",
+            weapon_allows_series_skill_assignment=True,
+        ),
+        decorations=(),
+        skill_definitions=(
+            normal_skill_definition(),
+            series_skill_definition("skill:series-a", (1,)),
+            series_skill_definition("skill:series-b", (1,)),
+        ),
+        appraisal_charm_skill_groups=(appraisal_skill_group(),),
+        appraisal_charm_patterns=(appraisal_pattern(),),
+    )
+
+    assert [
+        (candidate.equipment[0].series_skill_id, candidate.equipment[-1].equipment_id)
+        for candidate in candidates
+    ] == [
+        ("skill:series-a", "equipment:charm:fixed"),
+        (
+            "skill:series-a",
+            ("generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-1"),
+        ),
+        ("skill:series-b", "equipment:charm:fixed"),
+        (
+            "skill:series-b",
+            ("generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-1"),
+        ),
+    ]
+
+
+def test_candidate_order_keeps_weapon_head_charm_and_placement_dimensions() -> None:
+    equipment = (
+        equipment_definition(
+            EquipmentPart.WEAPON,
+            "equipment:weapon",
+            slots=(weapon_slot(1),),
+            allows_series_skill_assignment=True,
+        ),
+        equipment_definition(EquipmentPart.HEAD, "equipment:head-a"),
+        equipment_definition(EquipmentPart.HEAD, "equipment:head-b"),
+        *(
+            equipment_definition(part, f"equipment:{part.value}")
+            for part in REQUIRED_PARTS
+            if part
+            not in {
+                EquipmentPart.WEAPON,
+                EquipmentPart.HEAD,
+                EquipmentPart.CHARM,
+            }
+        ),
+        equipment_definition(EquipmentPart.CHARM, "equipment:charm:fixed"),
+    )
+    decoration = decoration_definition()
+
+    candidates = enumerate_build_candidates(
+        equipment=equipment,
+        decorations=(decoration,),
+        skill_definitions=(
+            normal_skill_definition(),
+            series_skill_definition("skill:series-a", (1,)),
+            series_skill_definition("skill:series-b", (1,)),
+        ),
+        appraisal_charm_skill_groups=(appraisal_skill_group(),),
+        appraisal_charm_patterns=(appraisal_pattern(),),
+    )
+
+    observed = [
+        (
+            candidate.equipment[0].series_skill_id,
+            candidate.equipment[1].equipment_id,
+            candidate.equipment[-1].equipment_id,
+            candidate.placements,
+        )
+        for candidate in candidates
+    ]
+    assert len(observed) == 16
+    assert observed[:4] == [
+        (
+            "skill:series-a",
+            "equipment:head-a",
+            "equipment:charm:fixed",
+            (),
+        ),
+        (
+            "skill:series-a",
+            "equipment:head-a",
+            "equipment:charm:fixed",
+            (placement(),),
+        ),
+        (
+            "skill:series-a",
+            "equipment:head-a",
+            ("generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-1"),
+            (),
+        ),
+        (
+            "skill:series-a",
+            "equipment:head-a",
+            ("generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-1"),
+            (placement(),),
+        ),
+    ]
+    assert observed[8][0] == "skill:series-b"
+
+
+def test_generated_equipment_id_collision_with_original_equipment_is_rejected() -> None:
+    generated_id = (
+        "generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-1"
+    )
+
+    with pytest.raises(ValueError, match="equipment"):
+        enumerate_build_candidates(
+            equipment=complete_equipment(charm_id=generated_id),
+            decorations=(),
+            skill_definitions=(normal_skill_definition(),),
+            appraisal_charm_skill_groups=(appraisal_skill_group(),),
+            appraisal_charm_patterns=(appraisal_pattern(),),
+        )
+
+
+def test_omitted_appraisal_rules_preserve_legacy_enumeration() -> None:
+    equipment = two_head_two_charm_equipment()
+
+    legacy = enumerate_build_candidates(equipment=equipment, decorations=())
+    explicit_empty = enumerate_build_candidates(
+        equipment=equipment,
+        decorations=(),
+        appraisal_charm_skill_groups=(),
+        appraisal_charm_patterns=(),
+    )
+
+    assert explicit_empty == legacy

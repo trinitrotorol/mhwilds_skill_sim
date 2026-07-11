@@ -13,6 +13,8 @@ from mhwilds_skill_sim.api.search_response import (
     build_candidate_to_response,
 )
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
+from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 from mhwilds_skill_sim.solver.build import BuildCandidate
 from mhwilds_skill_sim.solver.search_result import BuildCandidateSearchResult
 from mhwilds_skill_sim.validation.placement import DecorationPlacement
@@ -24,12 +26,14 @@ def equipment_definition(
     *,
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    skills: tuple[SkillContribution, ...] = (),
+    slots: tuple[DecorationSlot, ...] = (),
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
         part=part,
-        skills=(),
-        slots=(),
+        skills=skills,
+        slots=slots,
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
     )
@@ -99,12 +103,16 @@ def test_build_candidate_to_response_converts_candidate_to_dict() -> None:
                 "part": "weapon",
                 "series_skill_id": None,
                 "group_skill_id": None,
+                "skills": [],
+                "slots": [],
             },
             {
                 "equipment_id": "equipment:head",
                 "part": "head",
                 "series_skill_id": None,
                 "group_skill_id": None,
+                "skills": [],
+                "slots": [],
             },
         ],
         "placements": [
@@ -143,6 +151,8 @@ def test_build_candidate_to_response_key_order() -> None:
         "part",
         "series_skill_id",
         "group_skill_id",
+        "skills",
+        "slots",
     ]
     assert list(response["placements"][0]) == [  # type: ignore[index]
         "equipment_id",
@@ -165,6 +175,8 @@ def test_build_candidate_to_response_uses_equipment_part_value() -> None:
             "part": "charm",
             "series_skill_id": None,
             "group_skill_id": None,
+            "skills": [],
+            "slots": [],
         },
     ]
 
@@ -192,12 +204,16 @@ def test_build_candidate_to_response_serializes_membership_values() -> None:
             "part": "weapon",
             "series_skill_id": "skill:series-bonus",
             "group_skill_id": "skill:group-bonus",
+            "skills": [],
+            "slots": [],
         },
         {
             "equipment_id": "equipment:head",
             "part": "head",
             "series_skill_id": None,
             "group_skill_id": None,
+            "skills": [],
+            "slots": [],
         },
     ]
 
@@ -241,6 +257,78 @@ def test_same_equipment_id_variants_serialize_with_distinct_memberships() -> Non
     assert equipment_responses[1]["series_skill_id"] == "skill:series-b"
     assert "allows_series_skill_assignment" not in equipment_responses[0]
     assert "allows_group_skill_assignment" not in equipment_responses[0]
+
+
+def test_build_candidate_to_response_serializes_fixed_equipment_skills_and_slots() -> (
+    None
+):
+    response = build_candidate_to_response(
+        candidate=candidate(
+            equipment=(
+                equipment_definition(
+                    EquipmentPart.HEAD,
+                    "equipment:head:fixed",
+                    skills=(
+                        SkillContribution("skill:critical-eye", 2),
+                        SkillContribution("skill:weakness-exploit", 1),
+                    ),
+                    slots=(
+                        DecorationSlot(DecorationKind.ARMOR, 3),
+                        DecorationSlot(DecorationKind.ARMOR, 1),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert response["equipment"] == [
+        {
+            "equipment_id": "equipment:head:fixed",
+            "part": "head",
+            "series_skill_id": None,
+            "group_skill_id": None,
+            "skills": [
+                {"skill_id": "skill:critical-eye", "level": 2},
+                {"skill_id": "skill:weakness-exploit", "level": 1},
+            ],
+            "slots": [
+                {"kind": "armor", "level": 3},
+                {"kind": "armor", "level": 1},
+            ],
+        }
+    ]
+
+
+def test_build_candidate_to_response_serializes_generated_appraisal_charm() -> None:
+    response = build_candidate_to_response(
+        candidate=candidate(
+            equipment=(
+                equipment_definition(
+                    EquipmentPart.CHARM,
+                    ("generated:appraisal-charm:rarity-8:pattern:test:combination-1"),
+                    skills=(
+                        SkillContribution("skill:attack-boost", 3),
+                        SkillContribution("skill:weapon-technique", 1),
+                    ),
+                    slots=(
+                        DecorationSlot(DecorationKind.WEAPON, 1),
+                        DecorationSlot(DecorationKind.ARMOR, 1),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    charm = response["equipment"][0]  # type: ignore[index]
+    assert charm["part"] == "charm"
+    assert charm["skills"] == [
+        {"skill_id": "skill:attack-boost", "level": 3},
+        {"skill_id": "skill:weapon-technique", "level": 1},
+    ]
+    assert charm["slots"] == [
+        {"kind": "weapon", "level": 1},
+        {"kind": "armor", "level": 1},
+    ]
 
 
 def test_build_candidate_to_response_preserves_input_order() -> None:
@@ -298,6 +386,12 @@ def test_build_candidate_to_response_is_json_serializable() -> None:
 
 def test_build_candidate_to_response_returns_new_mutable_containers_each_call() -> None:
     build = candidate(
+        equipment=(
+            equipment_definition(
+                skills=(SkillContribution("skill:attack-boost", 1),),
+                slots=(DecorationSlot(DecorationKind.WEAPON, 1),),
+            ),
+        ),
         placements=(placement(),),
         skill_levels=(("skill:attack-boost", 1),),
     )
@@ -307,6 +401,11 @@ def test_build_candidate_to_response_returns_new_mutable_containers_each_call() 
 
     assert first is not second
     assert first["equipment"] is not second["equipment"]
+    assert first["equipment"][0] is not second["equipment"][0]  # type: ignore[index]
+    assert first["equipment"][0]["skills"] is not second["equipment"][0]["skills"]  # type: ignore[index]
+    assert first["equipment"][0]["slots"] is not second["equipment"][0]["slots"]  # type: ignore[index]
+    assert first["equipment"][0]["skills"][0] is not second["equipment"][0]["skills"][0]  # type: ignore[index]
+    assert first["equipment"][0]["slots"][0] is not second["equipment"][0]["slots"][0]  # type: ignore[index]
     assert first["placements"] is not second["placements"]
     assert first["skill_levels"] is not second["skill_levels"]
 
@@ -318,6 +417,8 @@ def test_build_candidate_to_response_returns_new_mutable_containers_each_call() 
             "group_skill_id": None,
         }
     )
+    first["equipment"][0]["skills"][0]["level"] = 999  # type: ignore[index]
+    first["equipment"][0]["slots"][0]["level"] = 999  # type: ignore[index]
     first["skill_levels"][0]["level"] = 999  # type: ignore[index]
 
     assert second == build_candidate_to_response(candidate=build)

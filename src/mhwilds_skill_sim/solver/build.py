@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition
 from mhwilds_skill_sim.domain.skill import SkillDefinition
+from mhwilds_skill_sim.solver.appraisal_charms import (
+    generate_appraisal_charm_equipment_candidates,
+)
 from mhwilds_skill_sim.solver.decoration import (
     enumerate_decoration_placement_combinations,
 )
@@ -35,6 +42,8 @@ def enumerate_build_candidates(
     equipment: tuple[EquipmentDefinition, ...],
     decorations: tuple[DecorationDefinition, ...],
     skill_definitions: tuple[SkillDefinition, ...] = (),
+    appraisal_charm_skill_groups: tuple[AppraisalCharmSkillGroupDefinition, ...] = (),
+    appraisal_charm_patterns: tuple[AppraisalCharmPatternDefinition, ...] = (),
 ) -> tuple[BuildCandidate, ...]:
     _validate_equipment(value=equipment)
     _validate_decorations(value=decorations)
@@ -42,8 +51,14 @@ def enumerate_build_candidates(
     _validate_unique_equipment_ids(equipment=equipment)
     _validate_unique_decoration_ids(decorations=decorations)
 
+    generated_charms = generate_appraisal_charm_equipment_candidates(
+        skill_groups=appraisal_charm_skill_groups,
+        patterns=appraisal_charm_patterns,
+        skill_definitions=skill_definitions,
+    )
+    equipment_with_generated_charms = equipment + generated_charms
     expanded_equipment = expand_equipment_bonus_skill_variants(
-        equipment=equipment,
+        equipment=equipment_with_generated_charms,
         skill_definitions=skill_definitions,
     )
 

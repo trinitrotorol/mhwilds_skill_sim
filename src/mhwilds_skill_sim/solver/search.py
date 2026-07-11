@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition
 from mhwilds_skill_sim.domain.skill import SkillDefinition
@@ -18,11 +22,15 @@ def search_build_candidates_by_skill_requirements(
     decorations: tuple[DecorationDefinition, ...],
     requirements: tuple[SkillRequirement, ...],
     skill_definitions: tuple[SkillDefinition, ...] = (),
+    appraisal_charm_skill_groups: tuple[AppraisalCharmSkillGroupDefinition, ...] = (),
+    appraisal_charm_patterns: tuple[AppraisalCharmPatternDefinition, ...] = (),
 ) -> tuple[BuildCandidate, ...]:
     candidates = enumerate_build_candidates(
         equipment=equipment,
         decorations=decorations,
         skill_definitions=skill_definitions,
+        appraisal_charm_skill_groups=appraisal_charm_skill_groups,
+        appraisal_charm_patterns=appraisal_charm_patterns,
     )
     return filter_build_candidates_by_skill_requirements(
         candidates=candidates,

@@ -23,4 +23,6 @@ def search_catalog_build_candidates_by_skill_requirements(
         decorations=catalog.decorations,
         requirements=requirements,
         skill_definitions=catalog.skills,
+        appraisal_charm_skill_groups=catalog.appraisal_charm_skill_groups,
+        appraisal_charm_patterns=catalog.appraisal_charm_patterns,
     )

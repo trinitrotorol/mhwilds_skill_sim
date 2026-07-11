@@ -582,3 +582,75 @@ def test_search_service_scope_regression() -> None:
 def test_search_service_module_adds_no_result_or_request_types() -> None:
     for name in ("SearchRequest", "SolverResult", "BuildResult"):
         assert not hasattr(search_service, name)
+
+
+def test_generated_weapon_skill_payload_exposes_charm_and_artian_details() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=tiny_catalog(),
+        payload=payload(
+            requirements=[requirement("skill:fixture-weapon-technique", 1)],
+            max_results=1,
+        ),
+    )
+
+    candidates = response["candidates"]
+    assert isinstance(candidates, list)
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    charm = response_candidate_equipment_by_part(candidate, "charm")
+    weapon = response_candidate_equipment_by_part(candidate, "weapon")
+
+    assert charm["equipment_id"].startswith("generated:appraisal-charm:")  # type: ignore[union-attr]
+    assert charm["skills"] == [
+        {"skill_id": "skill:fixture-weapon-technique", "level": 1},
+        {"skill_id": "skill:attack-boost", "level": 1},
+        {"skill_id": "skill:weakness-exploit", "level": 1},
+    ]
+    assert charm["slots"] == [
+        {"kind": "weapon", "level": 1},
+        {"kind": "armor", "level": 1},
+        {"kind": "armor", "level": 1},
+    ]
+    assert weapon["series_skill_id"] == "skill:fixture-series-bonus"
+    assert weapon["group_skill_id"] == "skill:fixture-group-bonus"
+    assert response["total_count"] > 1  # type: ignore[operator]
+    assert response["truncated"] is True
+    json.dumps(response)
+    assert not response_contains_unserializable_value(response)
+
+
+def test_duplicate_skill_aggregation_route_is_visible_through_api() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=tiny_catalog(),
+        payload=payload(
+            requirements=[requirement("skill:attack-boost", 5)],
+            max_results=1000,
+        ),
+    )
+
+    candidates = response["candidates"]
+    assert isinstance(candidates, list)
+    aggregated_charms: list[dict[str, object]] = []
+    for candidate in candidates:
+        charm = response_candidate_equipment_by_part(candidate, "charm")
+        charm_id = charm["equipment_id"]
+        charm_skills = charm["skills"]
+        assert isinstance(charm_id, str)
+        assert isinstance(charm_skills, list)
+        levels = {skill["skill_id"]: skill["level"] for skill in charm_skills}
+        if (
+            charm_id.startswith("generated:appraisal-charm:")
+            and levels.get("skill:attack-boost") == 3
+        ):
+            aggregated_charms.append(charm)
+
+    assert aggregated_charms
+    assert all(
+        charm["skills"][0]  # type: ignore[index]
+        == {"skill_id": "skill:attack-boost", "level": 3}
+        for charm in aggregated_charms
+    )
+    assert len(candidates) == 1000
+    assert response["total_count"] > len(candidates)  # type: ignore[operator]
+    assert response["truncated"] is True
+    json.dumps(response)

@@ -9,8 +9,17 @@ import pytest
 
 from mhwilds_skill_sim.catalog.loader import load_catalog
 from mhwilds_skill_sim.catalog.model import Catalog
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
-from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.skill import (
+    SkillContribution,
+    SkillDefinition,
+    SkillKind,
+    SkillRankDefinition,
+)
 from mhwilds_skill_sim.solver import (
     BuildCandidate,
     SkillRequirement,
@@ -115,6 +124,50 @@ def manual_catalog() -> Catalog:
             weapon_skills=(skill("skill:attack-boost", 1),),
         ),
         decorations=(),
+    )
+
+
+def appraisal_catalog() -> Catalog:
+    skill_definitions = (
+        SkillDefinition(
+            skill_id="skill:attack-boost",
+            kind=SkillKind.ARMOR,
+            ranks=(
+                SkillRankDefinition(1, None),
+                SkillRankDefinition(2, None),
+                SkillRankDefinition(3, None),
+            ),
+        ),
+        SkillDefinition(
+            skill_id="skill:critical-eye",
+            kind=SkillKind.ARMOR,
+            ranks=(SkillRankDefinition(1, None),),
+        ),
+    )
+    groups = (
+        AppraisalCharmSkillGroupDefinition(
+            group_id="appraisal-group:A",
+            skills=(
+                skill("skill:attack-boost", 2),
+                skill("skill:critical-eye", 1),
+            ),
+        ),
+    )
+    patterns = (
+        AppraisalCharmPatternDefinition(
+            pattern_id="appraisal-pattern:r8-a",
+            rarity=8,
+            skill_group_ids=("appraisal-group:A",),
+            slots=(),
+        ),
+    )
+    return Catalog(
+        schema_version=1,
+        equipment=complete_equipment(),
+        decorations=(),
+        skills=skill_definitions,
+        appraisal_charm_skill_groups=groups,
+        appraisal_charm_patterns=patterns,
     )
 
 
@@ -606,3 +659,51 @@ def test_search_adds_no_request_or_solver_result_public_types() -> None:
     for name in ("SearchRequest", "SolverResult", "BuildResult"):
         assert not hasattr(solver, name)
         assert not hasattr(search_result_module, name)
+
+
+def test_appraisal_generation_happens_before_filtering_and_limiting() -> None:
+    catalog = appraisal_catalog()
+    requirements = (requirement("skill:critical-eye", 1),)
+    full = search_catalog_build_candidates_by_skill_requirements(
+        catalog=catalog,
+        requirements=requirements,
+    )
+
+    result = limited_search(
+        catalog=catalog,
+        requirements=requirements,
+        max_results=0,
+    )
+
+    assert len(full) == 1
+    assert full[0].equipment[-1].equipment_id.endswith("combination-2")
+    assert full[0].equipment[-1].skills == (skill("skill:critical-eye", 1),)
+    assert result.candidates == ()
+    assert result.total_count == 1
+    assert result.truncated is True
+
+
+def test_limited_appraisal_results_are_prefix_with_pre_slice_total_count() -> None:
+    catalog = appraisal_catalog()
+    full = search_catalog_build_candidates_by_skill_requirements(
+        catalog=catalog,
+        requirements=(),
+    )
+
+    result = limited_search(
+        catalog=catalog,
+        requirements=(),
+        max_results=2,
+    )
+
+    assert len(full) == 3
+    assert result.candidates == full[:2]
+    assert result.total_count == len(full)
+    assert result.truncated is True
+    fixed_charm = result.candidates[0].equipment[-1]
+    generated_charm = result.candidates[1].equipment[-1]
+    assert fixed_charm.equipment_id == "equipment:charm"
+    assert generated_charm.equipment_id == (
+        "generated:appraisal-charm:rarity-8:appraisal-pattern:r8-a:combination-1"
+    )
+    assert generated_charm.skills == (skill("skill:attack-boost", 2),)

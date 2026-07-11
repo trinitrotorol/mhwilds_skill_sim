@@ -1,5 +1,8 @@
 """Solver helpers."""
 
+from mhwilds_skill_sim.solver.appraisal_charms import (
+    generate_appraisal_charm_equipment_candidates,
+)
 from mhwilds_skill_sim.solver.build import (
     BuildCandidate,
     enumerate_build_candidates,
@@ -38,6 +41,7 @@ __all__ = [
     "enumerate_equipment_selections",
     "expand_equipment_bonus_skill_variants",
     "filter_build_candidates_by_skill_requirements",
+    "generate_appraisal_charm_equipment_candidates",
     "search_catalog_build_candidates_by_skill_requirements",
     "search_build_candidates_by_skill_requirements",
     "search_limited_catalog_build_candidates_by_skill_requirements",

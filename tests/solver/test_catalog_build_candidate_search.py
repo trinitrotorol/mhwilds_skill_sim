@@ -133,6 +133,14 @@ def selected_weapon(candidate: BuildCandidate) -> EquipmentDefinition:
     )
 
 
+def selected_charm(candidate: BuildCandidate) -> EquipmentDefinition:
+    return next(
+        equipment
+        for equipment in candidate.equipment
+        if equipment.part is EquipmentPart.CHARM
+    )
+
+
 def test_empty_catalog_and_empty_requirements_returns_empty_tuple() -> None:
     catalog = Catalog(schema_version=1, equipment=(), decorations=())
 
@@ -150,6 +158,8 @@ def test_tiny_catalog_empty_requirements_returns_candidates() -> None:
         decorations=catalog.decorations,
         requirements=(),
         skill_definitions=catalog.skills,
+        appraisal_charm_skill_groups=catalog.appraisal_charm_skill_groups,
+        appraisal_charm_patterns=catalog.appraisal_charm_patterns,
     )
 
 
@@ -307,6 +317,8 @@ def test_result_order_matches_existing_search_order() -> None:
         decorations=catalog.decorations,
         requirements=requirements,
         skill_definitions=catalog.skills,
+        appraisal_charm_skill_groups=catalog.appraisal_charm_skill_groups,
+        appraisal_charm_patterns=catalog.appraisal_charm_patterns,
     )
 
     assert result == direct_result
@@ -395,6 +407,8 @@ def test_delegates_to_existing_search_with_catalog_contents() -> None:
             decorations=catalog.decorations,
             requirements=requirements,
             skill_definitions=catalog.skills,
+            appraisal_charm_skill_groups=catalog.appraisal_charm_skill_groups,
+            appraisal_charm_patterns=catalog.appraisal_charm_patterns,
         )
     )
 
@@ -421,6 +435,8 @@ def test_catalog_subclass_uses_bonus_skill_definitions() -> None:
         equipment=base_catalog.equipment,
         decorations=base_catalog.decorations,
         skills=base_catalog.skills,
+        appraisal_charm_skill_groups=base_catalog.appraisal_charm_skill_groups,
+        appraisal_charm_patterns=base_catalog.appraisal_charm_patterns,
     )
 
     result = catalog_search(
@@ -491,6 +507,8 @@ def test_search_does_not_rank_or_limit_satisfying_candidates() -> None:
         decorations=catalog.decorations,
         requirements=(requirement("skill:attack-boost", 3),),
         skill_definitions=catalog.skills,
+        appraisal_charm_skill_groups=catalog.appraisal_charm_skill_groups,
+        appraisal_charm_patterns=catalog.appraisal_charm_patterns,
     )
 
 
@@ -501,3 +519,162 @@ def test_search_adds_no_request_or_result_public_types() -> None:
     for name in ("SearchRequest", "SolverResult", "BuildResult"):
         assert not hasattr(solver, name)
         assert not hasattr(catalog_search_module, name)
+
+
+def test_fixture_search_contains_exact_generated_and_fixed_charm_pool() -> None:
+    result = catalog_search(catalog=tiny_catalog(), requirements=())
+    expected_generated_ids = [
+        (
+            "generated:appraisal-charm:rarity-8:"
+            "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1:combination-1"
+        ),
+        (
+            "generated:appraisal-charm:rarity-8:"
+            "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1:combination-2"
+        ),
+        (
+            "generated:appraisal-charm:rarity-8:"
+            "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1:combination-3"
+        ),
+        (
+            "generated:appraisal-charm:rarity-8:"
+            "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1:combination-4"
+        ),
+        (
+            "generated:appraisal-charm:rarity-8:"
+            "fixture:appraisal-pattern:r8-b-j-w1-a1:combination-1"
+        ),
+        (
+            "generated:appraisal-charm:rarity-8:"
+            "fixture:appraisal-pattern:r8-b-j-w1-a1:combination-2"
+        ),
+        (
+            "generated:appraisal-charm:rarity-7:"
+            "fixture:appraisal-pattern:r7-a-j-a2:combination-1"
+        ),
+        (
+            "generated:appraisal-charm:rarity-7:"
+            "fixture:appraisal-pattern:r7-a-j-a2:combination-2"
+        ),
+    ]
+    first_seen_generated_ids: list[str] = []
+    all_charm_ids: set[str] = set()
+    for candidate in result:
+        charm = selected_charm(candidate)
+        assert charm.part is EquipmentPart.CHARM
+        all_charm_ids.add(charm.equipment_id)
+        if (
+            charm.equipment_id.startswith("generated:appraisal-charm:")
+            and charm.equipment_id not in first_seen_generated_ids
+        ):
+            first_seen_generated_ids.append(charm.equipment_id)
+
+    assert first_seen_generated_ids == expected_generated_ids
+    assert set(first_seen_generated_ids) == set(expected_generated_ids)
+    assert {
+        "fixture:charm:power",
+        "fixture:charm:precision",
+    } <= all_charm_ids
+
+    assert any(
+        selected_charm(candidate).equipment_id.startswith("generated:appraisal-charm:")
+        and {
+            (
+                placement.decoration_id,
+                placement.slot_index,
+            )
+            for placement in candidate.placements
+            if placement.equipment_id == selected_charm(candidate).equipment_id
+        }
+        >= {
+            ("fixture:decoration:weapon-power-1", 0),
+            ("fixture:decoration:armor-power-1", 1),
+        }
+        for candidate in result
+    )
+
+
+def test_attack_level_five_can_use_aggregated_attack_three_charm_route() -> None:
+    result = catalog_search(
+        catalog=tiny_catalog(),
+        requirements=(requirement("skill:attack-boost", 5),),
+    )
+
+    assert result
+    generated_routes = [
+        candidate
+        for candidate in result
+        if selected_charm(candidate).equipment_id.startswith(
+            "generated:appraisal-charm:"
+        )
+        and selected_charm(candidate).skills
+        and selected_charm(candidate).skills[0] == skill("skill:attack-boost", 3)
+    ]
+    assert generated_routes
+    assert all(
+        dict(candidate.skill_levels)["skill:attack-boost"] >= 5
+        for candidate in generated_routes
+    )
+
+
+def test_weapon_technique_requirement_returns_generated_charm_routes() -> None:
+    result = catalog_search(
+        catalog=tiny_catalog(),
+        requirements=(requirement("skill:fixture-weapon-technique", 1),),
+    )
+
+    assert result
+    assert all(
+        any(
+            charm_skill.skill_id == "skill:fixture-weapon-technique"
+            for charm_skill in selected_charm(candidate).skills
+        )
+        for candidate in result
+    )
+    assert all(
+        selected_weapon(candidate).series_skill_id == "skill:fixture-series-bonus"
+        and selected_weapon(candidate).group_skill_id == "skill:fixture-group-bonus"
+        for candidate in result
+    )
+
+
+def test_weapon_technique_and_weakness_exploit_select_generated_routes() -> None:
+    requirements = (
+        requirement("skill:fixture-weapon-technique", 1),
+        requirement("skill:weakness-exploit", 3),
+    )
+
+    result = catalog_search(catalog=tiny_catalog(), requirements=requirements)
+
+    assert result
+    assert all(
+        {charm_skill.skill_id for charm_skill in selected_charm(candidate).skills}
+        >= {
+            "skill:fixture-weapon-technique",
+            "skill:weakness-exploit",
+        }
+        for candidate in result
+    )
+
+
+def test_catalog_subclass_preserves_appraisal_generation() -> None:
+    base = tiny_catalog()
+    catalog = CatalogSubclass(
+        schema_version=base.schema_version,
+        equipment=base.equipment,
+        decorations=base.decorations,
+        skills=base.skills,
+        appraisal_charm_skill_groups=base.appraisal_charm_skill_groups,
+        appraisal_charm_patterns=base.appraisal_charm_patterns,
+    )
+
+    result = catalog_search(
+        catalog=catalog,
+        requirements=(requirement("skill:fixture-weapon-technique", 1),),
+    )
+
+    assert result
+    assert all(
+        selected_charm(candidate).equipment_id.startswith("generated:appraisal-charm:")
+        for candidate in result
+    )

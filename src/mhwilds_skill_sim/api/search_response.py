@@ -20,6 +20,20 @@ def build_candidate_to_response(
                 "part": equipment.part.value,
                 "series_skill_id": equipment.series_skill_id,
                 "group_skill_id": equipment.group_skill_id,
+                "skills": [
+                    {
+                        "skill_id": skill.skill_id,
+                        "level": skill.level,
+                    }
+                    for skill in equipment.skills
+                ],
+                "slots": [
+                    {
+                        "kind": slot.kind.value,
+                        "level": slot.level,
+                    }
+                    for slot in equipment.slots
+                ],
             }
             for equipment in candidate.equipment
         ],

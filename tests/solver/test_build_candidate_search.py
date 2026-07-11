@@ -5,6 +5,10 @@ from collections.abc import Iterator
 
 import pytest
 
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import (
@@ -161,6 +165,44 @@ def group_skill_definition(
     return bonus_skill_definition(skill_id, SkillKind.GROUP, thresholds)
 
 
+def normal_skill_definition(
+    skill_id: str = "skill:attack-boost",
+    *,
+    kind: SkillKind = SkillKind.ARMOR,
+    maximum_level: int = 3,
+) -> SkillDefinition:
+    return SkillDefinition(
+        skill_id=skill_id,
+        kind=kind,
+        ranks=tuple(
+            SkillRankDefinition(level=level, required_pieces=None)
+            for level in range(1, maximum_level + 1)
+        ),
+    )
+
+
+def appraisal_skill_group(
+    group_id: str = "appraisal-group:A",
+    skills: tuple[SkillContribution, ...] = (
+        SkillContribution("skill:attack-boost", 1),
+    ),
+) -> AppraisalCharmSkillGroupDefinition:
+    return AppraisalCharmSkillGroupDefinition(group_id=group_id, skills=skills)
+
+
+def appraisal_pattern(
+    pattern_id: str = "appraisal-pattern:r8-a",
+    *,
+    skill_group_ids: tuple[str, ...] = ("appraisal-group:A",),
+) -> AppraisalCharmPatternDefinition:
+    return AppraisalCharmPatternDefinition(
+        pattern_id=pattern_id,
+        rarity=8,
+        skill_group_ids=skill_group_ids,
+        slots=(),
+    )
+
+
 def artian_skill_definitions() -> tuple[SkillDefinition, ...]:
     return (
         series_skill_definition("skill:series-a", (1,)),
@@ -245,12 +287,16 @@ def search_candidates(
     decorations: tuple[DecorationDefinition, ...],
     requirements: tuple[SkillRequirement, ...],
     skill_definitions: tuple[SkillDefinition, ...] = (),
+    appraisal_charm_skill_groups: tuple[AppraisalCharmSkillGroupDefinition, ...] = (),
+    appraisal_charm_patterns: tuple[AppraisalCharmPatternDefinition, ...] = (),
 ) -> tuple[BuildCandidate, ...]:
     return search_build_candidates_by_skill_requirements(
         equipment=equipment,
         decorations=decorations,
         requirements=requirements,
         skill_definitions=skill_definitions,
+        appraisal_charm_skill_groups=appraisal_charm_skill_groups,
+        appraisal_charm_patterns=appraisal_charm_patterns,
     )
 
 
@@ -879,3 +925,210 @@ def test_public_search_can_be_used_without_direct_filter_dependency() -> None:
     )
 
     assert len(result) == 1
+
+
+def test_generated_charm_satisfies_armor_skill_requirement() -> None:
+    result = search_candidates(
+        equipment=complete_equipment(),
+        decorations=(),
+        requirements=(requirement("skill:attack-boost", 2),),
+        skill_definitions=(normal_skill_definition(maximum_level=2),),
+        appraisal_charm_skill_groups=(
+            appraisal_skill_group(skills=(skill("skill:attack-boost", 2),)),
+        ),
+        appraisal_charm_patterns=(appraisal_pattern(),),
+    )
+
+    assert len(result) == 1
+    assert result[0].equipment[-1].equipment_id.startswith("generated:appraisal-charm:")
+    assert result[0].equipment[-1].skills == (skill("skill:attack-boost", 2),)
+
+
+def test_generated_charm_satisfies_weapon_skill_requirement() -> None:
+    result = search_candidates(
+        equipment=complete_equipment(),
+        decorations=(),
+        requirements=(requirement("skill:weapon-technique", 1),),
+        skill_definitions=(
+            normal_skill_definition(
+                "skill:weapon-technique",
+                kind=SkillKind.WEAPON,
+                maximum_level=1,
+            ),
+        ),
+        appraisal_charm_skill_groups=(
+            appraisal_skill_group(
+                skills=(skill("skill:weapon-technique", 1),),
+            ),
+        ),
+        appraisal_charm_patterns=(appraisal_pattern(),),
+    )
+
+    assert len(result) == 1
+    assert dict(result[0].skill_levels)["skill:weapon-technique"] == 1
+
+
+def test_summed_duplicate_charm_skills_satisfy_higher_requirement() -> None:
+    groups = (
+        appraisal_skill_group(
+            "appraisal-group:B",
+            (skill("skill:attack-boost", 2),),
+        ),
+        appraisal_skill_group(
+            "appraisal-group:A",
+            (skill("skill:attack-boost", 1),),
+        ),
+    )
+
+    result = search_candidates(
+        equipment=complete_equipment(),
+        decorations=(),
+        requirements=(requirement("skill:attack-boost", 3),),
+        skill_definitions=(normal_skill_definition(maximum_level=3),),
+        appraisal_charm_skill_groups=groups,
+        appraisal_charm_patterns=(
+            appraisal_pattern(
+                skill_group_ids=("appraisal-group:B", "appraisal-group:A"),
+            ),
+        ),
+    )
+
+    assert len(result) == 1
+    assert result[0].equipment[-1].skills == (skill("skill:attack-boost", 3),)
+
+
+def test_simultaneous_requirements_select_correct_generated_charm() -> None:
+    groups = (
+        appraisal_skill_group(
+            "appraisal-group:B",
+            (
+                skill("skill:attack-boost", 2),
+                skill("skill:weapon-technique", 1),
+            ),
+        ),
+        appraisal_skill_group(
+            "appraisal-group:J",
+            (skill("skill:weakness-exploit", 1),),
+        ),
+    )
+
+    result = search_candidates(
+        equipment=complete_equipment(),
+        decorations=(),
+        requirements=(
+            requirement("skill:weapon-technique", 1),
+            requirement("skill:weakness-exploit", 1),
+        ),
+        skill_definitions=(
+            normal_skill_definition("skill:attack-boost"),
+            normal_skill_definition(
+                "skill:weapon-technique",
+                kind=SkillKind.WEAPON,
+                maximum_level=1,
+            ),
+            normal_skill_definition("skill:weakness-exploit"),
+        ),
+        appraisal_charm_skill_groups=groups,
+        appraisal_charm_patterns=(
+            appraisal_pattern(
+                skill_group_ids=("appraisal-group:B", "appraisal-group:J"),
+            ),
+        ),
+    )
+
+    assert len(result) == 1
+    assert result[0].equipment[-1].skills == (
+        skill("skill:weapon-technique", 1),
+        skill("skill:weakness-exploit", 1),
+    )
+    assert result[0].equipment[-1].equipment_id.endswith("combination-2")
+
+
+def test_requirement_absent_from_generated_charms_returns_empty() -> None:
+    result = search_candidates(
+        equipment=complete_equipment(),
+        decorations=(),
+        requirements=(requirement("skill:not-generated", 1),),
+        skill_definitions=(normal_skill_definition(),),
+        appraisal_charm_skill_groups=(appraisal_skill_group(),),
+        appraisal_charm_patterns=(appraisal_pattern(),),
+    )
+
+    assert result == ()
+
+
+def test_direct_search_result_order_follows_generated_charm_order() -> None:
+    groups = (
+        appraisal_skill_group(
+            "appraisal-group:A",
+            (
+                skill("skill:attack-boost", 1),
+                skill("skill:critical-eye", 1),
+            ),
+        ),
+        appraisal_skill_group(
+            "appraisal-group:J",
+            (skill("skill:weakness-exploit", 1),),
+        ),
+    )
+
+    result = search_candidates(
+        equipment=complete_equipment(),
+        decorations=(),
+        requirements=(requirement("skill:weakness-exploit", 1),),
+        skill_definitions=(
+            normal_skill_definition("skill:attack-boost"),
+            normal_skill_definition("skill:critical-eye"),
+            normal_skill_definition("skill:weakness-exploit"),
+        ),
+        appraisal_charm_skill_groups=groups,
+        appraisal_charm_patterns=(
+            appraisal_pattern(
+                skill_group_ids=("appraisal-group:A", "appraisal-group:J"),
+            ),
+        ),
+    )
+
+    assert [candidate.equipment[-1].skills for candidate in result] == [
+        (
+            skill("skill:attack-boost", 1),
+            skill("skill:weakness-exploit", 1),
+        ),
+        (
+            skill("skill:critical-eye", 1),
+            skill("skill:weakness-exploit", 1),
+        ),
+    ]
+
+
+def test_search_appraisal_arguments_are_keyword_only_and_default_empty() -> None:
+    signature = inspect.signature(search_build_candidates_by_skill_requirements)
+
+    for field_name in (
+        "appraisal_charm_skill_groups",
+        "appraisal_charm_patterns",
+    ):
+        assert signature.parameters[field_name].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters[field_name].default == ()
+
+
+def test_omitting_appraisal_arguments_preserves_legacy_search() -> None:
+    equipment = complete_equipment(
+        weapon_skills=(skill("skill:attack-boost", 1),),
+    )
+    requirements = (requirement("skill:attack-boost", 1),)
+
+    legacy = search_candidates(
+        equipment=equipment,
+        decorations=(),
+        requirements=requirements,
+    )
+    explicit_empty = search_candidates(
+        equipment=equipment,
+        decorations=(),
+        requirements=requirements,
+        appraisal_charm_skill_groups=(),
+        appraisal_charm_patterns=(),
+    )
+
+    assert explicit_empty == legacy
