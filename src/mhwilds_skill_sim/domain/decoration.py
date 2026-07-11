@@ -13,6 +13,7 @@ class DecorationDefinition:
     decoration_id: str
     required_slot: DecorationSlot
     skills: tuple[SkillContribution, ...]
+    display_name: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.decoration_id) is not str:
@@ -47,3 +48,18 @@ class DecorationDefinition:
                 raise ValueError("skills must not contain duplicate skill_id")
 
             seen_skill_ids.add(skill.skill_id)
+
+        if self.display_name is not None:
+            if type(self.display_name) is not str:
+                raise TypeError("display_name must be str or None")
+
+            if self.display_name == "":
+                raise ValueError("display_name must not be empty")
+
+            if self.display_name.strip() == "":
+                raise ValueError("display_name must not be blank")
+
+            if self.display_name != self.display_name.strip():
+                raise ValueError(
+                    "display_name must not have leading or trailing whitespace"
+                )

@@ -30,11 +30,13 @@ def decoration(
     decoration_id: str = "decoration:attack-jewel-1",
     required_slot: DecorationSlot | None = None,
     skills: tuple[SkillContribution, ...] | None = None,
+    display_name: str | None = None,
 ) -> DecorationDefinition:
     return DecorationDefinition(
         decoration_id=decoration_id,
         required_slot=required_slot or weapon_slot(1),
         skills=skills or (skill(),),
+        display_name=display_name,
     )
 
 
@@ -265,3 +267,82 @@ def test_domain_package_keeps_existing_public_exports() -> None:
     assert ExportedDecorationSlot is DecorationSlot
     assert ExportedSkillContribution is SkillContribution
     assert exported_can_place_decoration is can_place_decoration
+
+
+def test_decoration_display_name_defaults_to_none() -> None:
+    created = DecorationDefinition(
+        decoration_id="decoration:attack-jewel-1",
+        required_slot=weapon_slot(1),
+        skills=(skill(),),
+    )
+
+    assert created.display_name is None
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    [
+        "攻撃珠【1】（テスト）",
+        "Attack Jewel [1] (Test)",
+        "Mixed CASE: Internal  Spaces!",
+    ],
+)
+def test_decoration_preserves_valid_display_name_exactly(display_name: str) -> None:
+    created = decoration(display_name=display_name)
+
+    assert created.display_name == display_name
+
+
+def test_decoration_equality_and_hash_include_display_name() -> None:
+    japanese = decoration(display_name="攻撃珠【1】（テスト）")
+    same = decoration(display_name="攻撃珠【1】（テスト）")
+    english = decoration(display_name="Attack Jewel [1] (Test)")
+    absent = decoration()
+
+    assert japanese == same
+    assert hash(japanese) == hash(same)
+    assert japanese != english
+    assert japanese != absent
+
+
+def test_decoration_display_name_is_frozen() -> None:
+    created = decoration(display_name="攻撃珠【1】（テスト）")
+
+    with pytest.raises(FrozenInstanceError):
+        created.display_name = "変更"
+
+
+@pytest.mark.parametrize("display_name", ["", " ", "\t\n"])
+def test_decoration_rejects_empty_or_blank_display_name(display_name: str) -> None:
+    with pytest.raises(ValueError, match="display_name"):
+        decoration(display_name=display_name)
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    [" 攻撃珠", "\tAttack Jewel", "攻撃珠 ", "Attack Jewel\n"],
+)
+def test_decoration_rejects_display_name_edge_whitespace(
+    display_name: str,
+) -> None:
+    with pytest.raises(ValueError, match="display_name"):
+        decoration(display_name=display_name)
+
+
+@pytest.mark.parametrize("display_name", [True, False, 1, 1.5, (), []])
+def test_decoration_rejects_non_string_display_name(display_name: object) -> None:
+    with pytest.raises(TypeError, match="display_name"):
+        DecorationDefinition(
+            decoration_id="decoration:attack-jewel-1",
+            required_slot=weapon_slot(1),
+            skills=(skill(),),
+            display_name=display_name,  # type: ignore[arg-type]
+        )
+
+
+def test_decoration_rejects_display_name_string_subclass() -> None:
+    class DisplayName(str):
+        pass
+
+    with pytest.raises(TypeError, match="display_name"):
+        decoration(display_name=DisplayName("Attack Jewel"))

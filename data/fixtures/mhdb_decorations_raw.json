@@ -1,0 +1,60 @@
+[
+  {
+    "id": 601,
+    "gameId": -2001,
+    "name": "武器技珠【1】（テスト）",
+    "slot": 1,
+    "kind": "weapon",
+    "skills": [
+      {
+        "skill": {
+          "id": 502,
+          "name": "ignored weapon skill stub"
+        },
+        "level": 1,
+        "description": "ignored weapon rank field"
+      }
+    ],
+    "description": "ignored weapon decoration",
+    "rarity": 8,
+    "icon": "ignored-weapon-decoration-icon"
+  },
+  {
+    "id": 602,
+    "gameId": 2002,
+    "name": "攻撃珠【1】（テスト）",
+    "slot": 1,
+    "kind": "armor",
+    "skills": [
+      {
+        "skill": {
+          "id": 501,
+          "name": "ignored armor skill stub"
+        },
+        "level": 1,
+        "description": "ignored armor rank field"
+      }
+    ],
+    "description": "ignored armor decoration level 1",
+    "rarity": 5
+  },
+  {
+    "id": 603,
+    "gameId": 2003,
+    "name": "攻撃珠Ⅱ【2】（テスト）",
+    "slot": 2,
+    "kind": "armor",
+    "skills": [
+      {
+        "skill": {
+          "id": 501,
+          "name": "ignored armor skill stub"
+        },
+        "level": 2,
+        "description": "ignored armor rank field"
+      }
+    ],
+    "description": "ignored armor decoration level 2",
+    "icon": "ignored-armor-decoration-icon"
+  }
+]

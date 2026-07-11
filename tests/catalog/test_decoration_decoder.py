@@ -385,3 +385,106 @@ def test_catalog_decode_error_still_imports_directly() -> None:
     error = CatalogDecodeError(path="$.decorations[0]", detail="invalid object")
 
     assert str(error) == "$.decorations[0]: invalid object"
+
+
+def test_decode_normalized_decoration_without_display_name_remains_valid() -> None:
+    decoded = decode_decoration_definition(value=single_skill_decoration_value())
+
+    assert decoded.display_name is None
+
+
+def test_decode_normalized_decoration_accepts_explicit_null_display_name() -> None:
+    value = single_skill_decoration_value()
+    value["display_name"] = None
+
+    decoded = decode_decoration_definition(value=value)
+
+    assert decoded.display_name is None
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    ["攻撃珠【1】（テスト）", "Attack Jewel [1] (Test)"],
+)
+def test_decode_normalized_decoration_preserves_display_name(
+    display_name: str,
+) -> None:
+    value = single_skill_decoration_value()
+    value["display_name"] = display_name
+
+    decoded = decode_decoration_definition(value=value)
+
+    assert decoded.display_name == display_name
+
+
+def test_decode_normalized_decoration_display_name_key_order_is_independent() -> None:
+    value = {
+        "display_name": "攻撃珠【1】（テスト）",
+        "skills": [{"skill_id": "skill:attack-boost", "level": 1}],
+        "decoration_id": "fixture:decoration:armor-power-1",
+        "required_slot": {"kind": "armor", "level": 1},
+    }
+
+    decoded = decode_decoration_definition(value=value)
+
+    assert decoded == DecorationDefinition(
+        decoration_id="fixture:decoration:armor-power-1",
+        required_slot=DecorationSlot(DecorationKind.ARMOR, 1),
+        skills=(SkillContribution("skill:attack-boost", 1),),
+        display_name="攻撃珠【1】（テスト）",
+    )
+
+
+@pytest.mark.parametrize(
+    ("display_name", "expected_cause"),
+    [
+        (True, TypeError),
+        (1, TypeError),
+        (1.5, TypeError),
+        ("", ValueError),
+        ("   ", ValueError),
+        (" Attack Jewel", ValueError),
+        ("Attack Jewel ", ValueError),
+    ],
+)
+def test_decode_normalized_decoration_wraps_invalid_display_name(
+    display_name: object,
+    expected_cause: type[Exception],
+) -> None:
+    value = single_skill_decoration_value()
+    value["display_name"] = display_name
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_decoration_definition(value=value, path="$.decorations[0]")
+
+    assert exc_info.value.path == "$.decorations[0]"
+    assert "display_name" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+def test_decode_normalized_decoration_rejects_display_name_string_subclass() -> None:
+    class DisplayName(str):
+        pass
+
+    value = single_skill_decoration_value()
+    value["display_name"] = DisplayName("Attack Jewel")
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_decoration_definition(value=value, path="$.decorations[0]")
+
+    assert exc_info.value.path == "$.decorations[0]"
+    assert "display_name" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, TypeError)
+
+
+def test_normalized_decoration_with_display_name_still_rejects_unknown_key() -> None:
+    value = single_skill_decoration_value()
+    value["display_name"] = "Attack Jewel"
+    value["description"] = "must remain upstream-only"
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_decoration_definition(value=value, path="$.decorations[0]")
+
+    assert exc_info.value.path == "$.decorations[0]"
+    assert "description" in exc_info.value.detail
+    assert exc_info.value.__cause__ is None

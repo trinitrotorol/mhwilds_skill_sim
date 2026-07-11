@@ -1,5 +1,6 @@
 [
   {
+    "id": 501,
     "gameId": 1001,
     "name": "攻撃力強化（テスト）",
     "kind": "armor",
@@ -23,6 +24,7 @@
     "description": "ignored armor skill"
   },
   {
+    "id": 502,
     "gameId": -1002,
     "name": "武器技術（テスト）",
     "kind": "weapon",
@@ -35,6 +37,7 @@
     "icon": "ignored-weapon-icon"
   },
   {
+    "id": 503,
     "gameId": 1003,
     "name": "シリーズボーナス（テスト）",
     "kind": "set",
@@ -53,6 +56,7 @@
     "legacyId": "ignored-set-id"
   },
   {
+    "id": 504,
     "gameId": 1004,
     "name": "グループボーナス（テスト）",
     "kind": "group",

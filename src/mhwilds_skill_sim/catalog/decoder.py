@@ -38,7 +38,7 @@ _SKILL_DEFINITION_KEY_ORDER = ("skill_id", "kind", "ranks")
 _DECORATION_SLOT_KEYS = frozenset(("kind", "level"))
 _DECORATION_SLOT_KEY_ORDER = ("kind", "level")
 _DECORATION_DEFINITION_KEYS = frozenset(
-    ("decoration_id", "required_slot", "skills"),
+    ("decoration_id", "required_slot", "skills", "display_name"),
 )
 _DECORATION_DEFINITION_KEY_ORDER = ("decoration_id", "required_slot", "skills")
 _EQUIPMENT_DEFINITION_KEYS = frozenset(
@@ -384,6 +384,7 @@ def decode_decoration_definition(
             decoration_id=value["decoration_id"],
             required_slot=required_slot,
             skills=skills,
+            display_name=value.get("display_name"),
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc
