@@ -11,6 +11,9 @@ from mhwilds_skill_sim.solver.decoration import (
     enumerate_decoration_placement_combinations,
 )
 from mhwilds_skill_sim.solver.equipment import enumerate_equipment_selections
+from mhwilds_skill_sim.solver.equipment_variants import (
+    expand_equipment_bonus_skill_variants,
+)
 from mhwilds_skill_sim.solver.filtering import (
     filter_build_candidates_by_skill_requirements,
 )
@@ -33,6 +36,7 @@ __all__ = [
     "enumerate_build_candidates",
     "enumerate_decoration_placement_combinations",
     "enumerate_equipment_selections",
+    "expand_equipment_bonus_skill_variants",
     "filter_build_candidates_by_skill_requirements",
     "search_catalog_build_candidates_by_skill_requirements",
     "search_build_candidates_by_skill_requirements",

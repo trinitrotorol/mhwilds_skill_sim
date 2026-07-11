@@ -27,6 +27,8 @@ class EquipmentDefinition:
     slots: tuple[DecorationSlot, ...]
     series_skill_id: str | None = None
     group_skill_id: str | None = None
+    allows_series_skill_assignment: bool = False
+    allows_group_skill_assignment: bool = False
 
     def __post_init__(self) -> None:
         if type(self.equipment_id) is not str:
@@ -95,3 +97,28 @@ class EquipmentDefinition:
                 raise ValueError(
                     "group_skill_id must not have leading or trailing whitespace"
                 )
+
+        if type(self.allows_series_skill_assignment) is not bool:
+            raise TypeError("allows_series_skill_assignment must be bool")
+
+        if type(self.allows_group_skill_assignment) is not bool:
+            raise TypeError("allows_group_skill_assignment must be bool")
+
+        if self.allows_series_skill_assignment and self.series_skill_id is not None:
+            raise ValueError(
+                "allows_series_skill_assignment requires series_skill_id to be None"
+            )
+
+        if self.allows_group_skill_assignment and self.group_skill_id is not None:
+            raise ValueError(
+                "allows_group_skill_assignment requires group_skill_id to be None"
+            )
+
+        if (
+            self.allows_series_skill_assignment
+            and self.part is not EquipmentPart.WEAPON
+        ):
+            raise ValueError("allows_series_skill_assignment requires weapon equipment")
+
+        if self.allows_group_skill_assignment and self.part is not EquipmentPart.WEAPON:
+            raise ValueError("allows_group_skill_assignment requires weapon equipment")

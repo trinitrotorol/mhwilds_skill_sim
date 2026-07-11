@@ -43,6 +43,8 @@ def equipment_value(
     *,
     series_skill_id: object = ABSENT,
     group_skill_id: object = ABSENT,
+    allows_series_skill_assignment: object = ABSENT,
+    allows_group_skill_assignment: object = ABSENT,
 ) -> dict[str, object]:
     value: dict[str, object] = {
         "equipment_id": equipment_id,
@@ -54,6 +56,10 @@ def equipment_value(
         value["series_skill_id"] = series_skill_id
     if group_skill_id is not ABSENT:
         value["group_skill_id"] = group_skill_id
+    if allows_series_skill_assignment is not ABSENT:
+        value["allows_series_skill_assignment"] = allows_series_skill_assignment
+    if allows_group_skill_assignment is not ABSENT:
+        value["allows_group_skill_assignment"] = allows_group_skill_assignment
     return value
 
 
@@ -585,6 +591,8 @@ def test_existing_equipment_definition_decoder_still_works() -> None:
     )
     assert equipment.series_skill_id is None
     assert equipment.group_skill_id is None
+    assert equipment.allows_series_skill_assignment is False
+    assert equipment.allows_group_skill_assignment is False
 
 
 def test_decode_equipment_definition_accepts_explicit_null_memberships() -> None:
@@ -594,6 +602,98 @@ def test_decode_equipment_definition_accepts_explicit_null_memberships() -> None
 
     assert equipment.series_skill_id is None
     assert equipment.group_skill_id is None
+
+
+def test_decode_equipment_definition_accepts_explicit_false_assignment_flags() -> None:
+    equipment = decode_equipment_definition(
+        value=equipment_value(
+            allows_series_skill_assignment=False,
+            allows_group_skill_assignment=False,
+        ),
+    )
+
+    assert equipment.allows_series_skill_assignment is False
+    assert equipment.allows_group_skill_assignment is False
+
+
+@pytest.mark.parametrize(
+    ("series_enabled", "group_enabled"),
+    [(True, False), (False, True), (True, True)],
+)
+def test_decode_equipment_definition_accepts_assignment_flags(
+    series_enabled: bool,
+    group_enabled: bool,
+) -> None:
+    equipment = decode_equipment_definition(
+        value=equipment_value(
+            allows_series_skill_assignment=series_enabled,
+            allows_group_skill_assignment=group_enabled,
+        ),
+    )
+
+    assert equipment.allows_series_skill_assignment is series_enabled
+    assert equipment.allows_group_skill_assignment is group_enabled
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["allows_series_skill_assignment", "allows_group_skill_assignment"],
+)
+@pytest.mark.parametrize("invalid_value", [None, 0, 1, "true", [], {}])
+def test_decode_equipment_definition_wraps_invalid_assignment_flag_types(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    value = equipment_value()
+    value[field_name] = invalid_value
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment")
+
+    assert exc_info.value.path == "$.equipment"
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, TypeError)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["allows_series_skill_assignment", "allows_group_skill_assignment"],
+)
+def test_decode_equipment_definition_wraps_non_weapon_assignment_error(
+    field_name: str,
+) -> None:
+    value = alternate_equipment_value()
+    value[field_name] = True
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment")
+
+    assert exc_info.value.path == "$.equipment"
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("membership_field", "assignment_field"),
+    [
+        ("series_skill_id", "allows_series_skill_assignment"),
+        ("group_skill_id", "allows_group_skill_assignment"),
+    ],
+)
+def test_decode_equipment_definition_wraps_fixed_membership_assignment_conflict(
+    membership_field: str,
+    assignment_field: str,
+) -> None:
+    value = equipment_value()
+    value[membership_field] = "skill:fixture-bonus"
+    value[assignment_field] = True
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment")
+
+    assert assignment_field in exc_info.value.detail
+    assert membership_field in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
 
 
 @pytest.mark.parametrize(
@@ -743,6 +843,47 @@ def test_decode_catalog_accepts_valid_equipment_membership_references() -> None:
     assert catalog.equipment[0].group_skill_id == "skill:fixture-group-bonus"
 
 
+def test_decode_catalog_accepts_dual_assignment_with_available_skill_kinds() -> None:
+    value = catalog_value()
+    value["equipment"] = [
+        equipment_value(
+            allows_series_skill_assignment=True,
+            allows_group_skill_assignment=True,
+        )
+    ]
+    value["skills"] = [
+        series_skill_definition_value(),
+        group_skill_definition_value(),
+    ]
+
+    catalog = decode_catalog(value=value)
+
+    assert catalog.equipment[0].allows_series_skill_assignment is True
+    assert catalog.equipment[0].allows_group_skill_assignment is True
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["allows_series_skill_assignment", "allows_group_skill_assignment"],
+)
+def test_decode_catalog_wraps_assignment_availability_failure_at_root(
+    field_name: str,
+) -> None:
+    equipment = equipment_value()
+    equipment[field_name] = True
+    value = catalog_value()
+    value["equipment"] = [equipment]
+    value["skills"] = []
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert "equipment" in exc_info.value.detail
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
 @pytest.mark.parametrize(
     ("field_name", "missing_skill_id"),
     [
@@ -822,6 +963,8 @@ def test_decode_catalog_without_membership_keys_remains_backward_compatible() ->
 
     assert catalog.equipment[0].series_skill_id is None
     assert catalog.equipment[0].group_skill_id is None
+    assert catalog.equipment[0].allows_series_skill_assignment is False
+    assert catalog.equipment[0].allows_group_skill_assignment is False
 
 
 def test_decode_catalog_accepts_explicit_null_memberships_without_skills() -> None:

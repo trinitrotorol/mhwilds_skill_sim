@@ -198,6 +198,35 @@ def test_load_catalog_membership_references_have_expected_skill_kinds() -> None:
             assert skills_by_id[equipment.group_skill_id].kind is SkillKind.GROUP
 
 
+def test_load_catalog_reads_training_blade_assignment_capabilities() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+    equipment_by_id = {
+        equipment.equipment_id: equipment for equipment in catalog.equipment
+    }
+    training_blade = equipment_by_id["fixture:weapon:training-blade"]
+
+    assert training_blade.series_skill_id is None
+    assert training_blade.group_skill_id is None
+    assert training_blade.allows_series_skill_assignment is True
+    assert training_blade.allows_group_skill_assignment is True
+
+
+def test_load_catalog_reads_other_equipment_as_nonassignable() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    for equipment in catalog.equipment:
+        if equipment.equipment_id != "fixture:weapon:training-blade":
+            assert equipment.allows_series_skill_assignment is False
+            assert equipment.allows_group_skill_assignment is False
+
+
+def test_load_catalog_has_series_and_group_assignment_options() -> None:
+    catalog = load_catalog(path=FIXTURE_PATH)
+
+    assert any(skill.kind is SkillKind.SERIES for skill in catalog.skills)
+    assert any(skill.kind is SkillKind.GROUP for skill in catalog.skills)
+
+
 def test_load_catalog_is_keyword_only() -> None:
     signature = inspect.signature(load_catalog)
 

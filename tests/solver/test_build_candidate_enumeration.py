@@ -59,6 +59,8 @@ def equipment_definition(
     slots: tuple[DecorationSlot, ...] = (),
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    allows_series_skill_assignment: bool = False,
+    allows_group_skill_assignment: bool = False,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
@@ -67,6 +69,8 @@ def equipment_definition(
         slots=slots,
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        allows_series_skill_assignment=allows_series_skill_assignment,
+        allows_group_skill_assignment=allows_group_skill_assignment,
     )
 
 
@@ -87,6 +91,8 @@ def complete_equipment(
     group_parts: tuple[EquipmentPart, ...] = (),
     series_skill_id: str = "skill:series-bonus",
     group_skill_id: str = "skill:group-bonus",
+    weapon_allows_series_skill_assignment: bool = False,
+    weapon_allows_group_skill_assignment: bool = False,
 ) -> tuple[EquipmentDefinition, ...]:
     return (
         equipment_definition(
@@ -100,6 +106,8 @@ def complete_equipment(
             group_skill_id=(
                 group_skill_id if EquipmentPart.WEAPON in group_parts else None
             ),
+            allows_series_skill_assignment=weapon_allows_series_skill_assignment,
+            allows_group_skill_assignment=weapon_allows_group_skill_assignment,
         ),
         equipment_definition(
             EquipmentPart.HEAD,
@@ -601,6 +609,107 @@ def test_candidates_include_activated_series_and_group_skill_levels() -> None:
         ("skill:series-bonus", 2),
         ("skill:group-bonus", 1),
     )
+
+
+def test_assignment_enabled_weapon_expands_before_equipment_selection() -> None:
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(
+            weapon_allows_series_skill_assignment=True,
+        ),
+        decorations=(),
+        skill_definitions=(
+            series_skill_definition("skill:series-a", (1,)),
+            series_skill_definition("skill:series-b", (1,)),
+        ),
+    )
+
+    assert len(candidates) == 2
+    assert [candidate.equipment[0].series_skill_id for candidate in candidates] == [
+        "skill:series-a",
+        "skill:series-b",
+    ]
+
+
+def test_dual_assignment_generates_one_candidate_family_per_combination() -> None:
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(
+            weapon_allows_series_skill_assignment=True,
+            weapon_allows_group_skill_assignment=True,
+        ),
+        decorations=(),
+        skill_definitions=(
+            group_skill_definition("skill:group-a", (1,)),
+            series_skill_definition("skill:series-a", (1,)),
+            group_skill_definition("skill:group-b", (1,)),
+            series_skill_definition("skill:series-b", (1,)),
+        ),
+    )
+
+    assert [
+        (
+            candidate.equipment[0].series_skill_id,
+            candidate.equipment[0].group_skill_id,
+        )
+        for candidate in candidates
+    ] == [
+        ("skill:series-a", "skill:group-a"),
+        ("skill:series-a", "skill:group-b"),
+        ("skill:series-b", "skill:group-a"),
+        ("skill:series-b", "skill:group-b"),
+    ]
+
+
+def test_generated_memberships_activate_selected_bonus_skills() -> None:
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(
+            weapon_allows_series_skill_assignment=True,
+            weapon_allows_group_skill_assignment=True,
+        ),
+        decorations=(),
+        skill_definitions=(
+            series_skill_definition("skill:series-a", (1,)),
+            series_skill_definition("skill:series-b", (1,)),
+            group_skill_definition("skill:group-a", (1,)),
+            group_skill_definition("skill:group-b", (1,)),
+        ),
+    )
+
+    for candidate in candidates:
+        weapon = candidate.equipment[0]
+        skill_levels = dict(candidate.skill_levels)
+        assert skill_levels[weapon.series_skill_id] == 1  # type: ignore[index]
+        assert skill_levels[weapon.group_skill_id] == 1  # type: ignore[index]
+        assert weapon.allows_series_skill_assignment is False
+        assert weapon.allows_group_skill_assignment is False
+
+
+def test_decoration_enumeration_runs_for_each_generated_variant() -> None:
+    candidates = enumerate_build_candidates(
+        equipment=complete_equipment(
+            weapon_slots=(weapon_slot(1),),
+            weapon_allows_series_skill_assignment=True,
+            weapon_allows_group_skill_assignment=True,
+        ),
+        decorations=(decoration_definition(),),
+        skill_definitions=(
+            series_skill_definition("skill:series-a", (1,)),
+            series_skill_definition("skill:series-b", (1,)),
+            group_skill_definition("skill:group-a", (1,)),
+            group_skill_definition("skill:group-b", (1,)),
+        ),
+    )
+
+    assert len(candidates) == 8
+    assert [candidate.placements for candidate in candidates] == [
+        (),
+        (placement(),),
+        (),
+        (placement(),),
+        (),
+        (placement(),),
+        (),
+        (placement(),),
+    ]
 
 
 def test_candidates_omit_memberships_below_activation_threshold() -> None:

@@ -37,6 +37,8 @@ EQUIPMENT_KEYS = {
     "slots",
     "series_skill_id",
     "group_skill_id",
+    "allows_series_skill_assignment",
+    "allows_group_skill_assignment",
 }
 DECORATION_KEYS = {"decoration_id", "required_slot", "skills"}
 SKILL_CONTRIBUTION_KEYS = {"skill_id", "level"}
@@ -162,6 +164,45 @@ def test_equipment_keys_match_contract() -> None:
 
     for equipment in data["equipment"]:
         assert set(equipment) == EQUIPMENT_KEYS
+
+
+def test_equipment_assignment_flags_are_exact_booleans() -> None:
+    data = load_fixture()
+
+    for equipment in data["equipment"]:
+        assert type(equipment["allows_series_skill_assignment"]) is bool
+        assert type(equipment["allows_group_skill_assignment"]) is bool
+
+
+def test_only_training_blade_has_assignment_capability() -> None:
+    data = load_fixture()
+    assignable_ids = {
+        equipment["equipment_id"]
+        for equipment in data["equipment"]
+        if equipment["allows_series_skill_assignment"]
+        or equipment["allows_group_skill_assignment"]
+    }
+
+    assert assignable_ids == {"fixture:weapon:training-blade"}
+
+
+def test_training_blade_is_dual_assignable_with_null_fixed_memberships() -> None:
+    data = load_fixture()
+    training_blade = equipment_by_id(data, "fixture:weapon:training-blade")
+
+    assert training_blade["allows_series_skill_assignment"] is True
+    assert training_blade["allows_group_skill_assignment"] is True
+    assert training_blade["series_skill_id"] is None
+    assert training_blade["group_skill_id"] is None
+
+
+def test_non_weapon_equipment_is_not_assignment_capable() -> None:
+    data = load_fixture()
+
+    for equipment in data["equipment"]:
+        if equipment["part"] != "weapon":
+            assert equipment["allows_series_skill_assignment"] is False
+            assert equipment["allows_group_skill_assignment"] is False
 
 
 def test_equipment_memberships_match_exact_fixture_contract() -> None:

@@ -21,12 +21,17 @@ from mhwilds_skill_sim.validation.placement import DecorationPlacement
 def equipment_definition(
     part: EquipmentPart = EquipmentPart.WEAPON,
     equipment_id: str | None = None,
+    *,
+    series_skill_id: str | None = None,
+    group_skill_id: str | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
         part=part,
         skills=(),
         slots=(),
+        series_skill_id=series_skill_id,
+        group_skill_id=group_skill_id,
     )
 
 
@@ -92,10 +97,14 @@ def test_build_candidate_to_response_converts_candidate_to_dict() -> None:
             {
                 "equipment_id": "equipment:weapon",
                 "part": "weapon",
+                "series_skill_id": None,
+                "group_skill_id": None,
             },
             {
                 "equipment_id": "equipment:head",
                 "part": "head",
+                "series_skill_id": None,
+                "group_skill_id": None,
             },
         ],
         "placements": [
@@ -129,7 +138,12 @@ def test_build_candidate_to_response_key_order() -> None:
     )
 
     assert list(response) == ["equipment", "placements", "skill_levels"]
-    assert list(response["equipment"][0]) == ["equipment_id", "part"]  # type: ignore[index]
+    assert list(response["equipment"][0]) == [  # type: ignore[index]
+        "equipment_id",
+        "part",
+        "series_skill_id",
+        "group_skill_id",
+    ]
     assert list(response["placements"][0]) == [  # type: ignore[index]
         "equipment_id",
         "slot_index",
@@ -149,8 +163,84 @@ def test_build_candidate_to_response_uses_equipment_part_value() -> None:
         {
             "equipment_id": "equipment:charm",
             "part": "charm",
+            "series_skill_id": None,
+            "group_skill_id": None,
         },
     ]
+
+
+def test_build_candidate_to_response_serializes_membership_values() -> None:
+    response = build_candidate_to_response(
+        candidate=candidate(
+            equipment=(
+                equipment_definition(
+                    equipment_id="equipment:weapon",
+                    series_skill_id="skill:series-bonus",
+                    group_skill_id="skill:group-bonus",
+                ),
+                equipment_definition(
+                    EquipmentPart.HEAD,
+                    "equipment:head",
+                ),
+            ),
+        ),
+    )
+
+    assert response["equipment"] == [
+        {
+            "equipment_id": "equipment:weapon",
+            "part": "weapon",
+            "series_skill_id": "skill:series-bonus",
+            "group_skill_id": "skill:group-bonus",
+        },
+        {
+            "equipment_id": "equipment:head",
+            "part": "head",
+            "series_skill_id": None,
+            "group_skill_id": None,
+        },
+    ]
+
+
+def test_same_equipment_id_variants_serialize_with_distinct_memberships() -> None:
+    response = build_candidate_search_result_to_response(
+        result=BuildCandidateSearchResult(
+            candidates=(
+                candidate(
+                    equipment=(
+                        equipment_definition(
+                            equipment_id="equipment:weapon:artian",
+                            series_skill_id="skill:series-a",
+                            group_skill_id="skill:group-a",
+                        ),
+                    ),
+                ),
+                candidate(
+                    equipment=(
+                        equipment_definition(
+                            equipment_id="equipment:weapon:artian",
+                            series_skill_id="skill:series-b",
+                            group_skill_id="skill:group-b",
+                        ),
+                    ),
+                ),
+            ),
+            total_count=2,
+            truncated=False,
+        ),
+    )
+
+    equipment_responses = [
+        candidate_response["equipment"][0]  # type: ignore[index]
+        for candidate_response in response["candidates"]  # type: ignore[union-attr]
+    ]
+    assert (
+        equipment_responses[0]["equipment_id"] == equipment_responses[1]["equipment_id"]
+    )
+    assert equipment_responses[0]["series_skill_id"] == "skill:series-a"
+    assert equipment_responses[1]["series_skill_id"] == "skill:series-b"
+    assert "allows_series_skill_assignment" not in equipment_responses[0]
+    assert "allows_group_skill_assignment" not in equipment_responses[0]
 
 
 def test_build_candidate_to_response_preserves_input_order() -> None:
@@ -220,7 +310,14 @@ def test_build_candidate_to_response_returns_new_mutable_containers_each_call() 
     assert first["placements"] is not second["placements"]
     assert first["skill_levels"] is not second["skill_levels"]
 
-    first["equipment"].append({"equipment_id": "changed", "part": "head"})  # type: ignore[union-attr]
+    first["equipment"].append(  # type: ignore[union-attr]
+        {
+            "equipment_id": "changed",
+            "part": "head",
+            "series_skill_id": None,
+            "group_skill_id": None,
+        }
+    )
     first["skill_levels"][0]["level"] = 999  # type: ignore[index]
 
     assert second == build_candidate_to_response(candidate=build)
@@ -369,7 +466,12 @@ def test_build_candidate_search_result_to_response_returns_new_containers_each_c
 
     first["candidates"].append({"changed": True})  # type: ignore[union-attr]
     first["candidates"][0]["equipment"].append(  # type: ignore[index]
-        {"equipment_id": "changed", "part": "head"},
+        {
+            "equipment_id": "changed",
+            "part": "head",
+            "series_skill_id": None,
+            "group_skill_id": None,
+        },
     )
 
     assert second == build_candidate_search_result_to_response(result=result)

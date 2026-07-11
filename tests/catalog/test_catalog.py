@@ -35,6 +35,8 @@ def equipment(
     slots: tuple[DecorationSlot, ...] | None = None,
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    allows_series_skill_assignment: bool = False,
+    allows_group_skill_assignment: bool = False,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
@@ -43,6 +45,8 @@ def equipment(
         slots=slots if slots is not None else (weapon_slot(1),),
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        allows_series_skill_assignment=allows_series_skill_assignment,
+        allows_group_skill_assignment=allows_group_skill_assignment,
     )
 
 
@@ -189,6 +193,108 @@ def test_catalog_allows_unused_series_and_group_skill_definitions() -> None:
     created = catalog(skill_items=skill_items)
 
     assert created.skills == skill_items
+
+
+def test_catalog_accepts_series_assignment_with_available_series_skill() -> None:
+    series_skill = series_skill_definition()
+    equipment_item = equipment(allows_series_skill_assignment=True)
+
+    created = catalog(
+        equipment_items=(equipment_item,),
+        skill_items=(series_skill,),
+    )
+
+    assert created.equipment == (equipment_item,)
+
+
+def test_catalog_accepts_group_assignment_with_available_group_skill() -> None:
+    group_skill = group_skill_definition()
+    equipment_item = equipment(allows_group_skill_assignment=True)
+
+    created = catalog(
+        equipment_items=(equipment_item,),
+        skill_items=(group_skill,),
+    )
+
+    assert created.equipment == (equipment_item,)
+
+
+def test_catalog_accepts_simultaneous_assignment_availability() -> None:
+    equipment_item = equipment(
+        allows_series_skill_assignment=True,
+        allows_group_skill_assignment=True,
+    )
+
+    created = catalog(
+        equipment_items=(equipment_item,),
+        skill_items=(series_skill_definition(), group_skill_definition()),
+    )
+
+    assert created.equipment == (equipment_item,)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["allows_series_skill_assignment", "allows_group_skill_assignment"],
+)
+def test_catalog_rejects_assignment_without_matching_skill_kind(
+    field_name: str,
+) -> None:
+    assignments = {field_name: True}
+    equipment_item = EquipmentDefinition(
+        equipment_id="equipment:weapon:training-blade",
+        part=EquipmentPart.WEAPON,
+        skills=(),
+        slots=(),
+        **assignments,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(equipment_items=(equipment_item,), skill_items=())
+
+    assert "equipment" in str(exc_info.value)
+    assert field_name in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "unrelated_skill"),
+    [
+        (
+            "allows_series_skill_assignment",
+            skill_definition("skill:armor", SkillKind.ARMOR),
+        ),
+        (
+            "allows_series_skill_assignment",
+            skill_definition("skill:weapon", SkillKind.WEAPON),
+        ),
+        (
+            "allows_group_skill_assignment",
+            skill_definition("skill:armor", SkillKind.ARMOR),
+        ),
+        (
+            "allows_group_skill_assignment",
+            skill_definition("skill:weapon", SkillKind.WEAPON),
+        ),
+    ],
+)
+def test_catalog_unrelated_skill_kinds_do_not_satisfy_assignment_availability(
+    field_name: str,
+    unrelated_skill: SkillDefinition,
+) -> None:
+    assignments = {field_name: True}
+    equipment_item = EquipmentDefinition(
+        equipment_id="equipment:weapon:training-blade",
+        part=EquipmentPart.WEAPON,
+        skills=(),
+        slots=(),
+        **assignments,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError, match=field_name):
+        catalog(
+            equipment_items=(equipment_item,),
+            skill_items=(unrelated_skill,),
+        )
 
 
 @pytest.mark.parametrize(

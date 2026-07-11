@@ -111,7 +111,9 @@
         }
       ],
       "series_skill_id": null,
-      "group_skill_id": null
+      "group_skill_id": null,
+      "allows_series_skill_assignment": true,
+      "allows_group_skill_assignment": true
     },
     {
       "equipment_id": "fixture:head:precision-alpha",
@@ -129,7 +131,9 @@
         }
       ],
       "series_skill_id": "skill:fixture-series-bonus",
-      "group_skill_id": "skill:fixture-group-bonus"
+      "group_skill_id": "skill:fixture-group-bonus",
+      "allows_series_skill_assignment": false,
+      "allows_group_skill_assignment": false
     },
     {
       "equipment_id": "fixture:head:tenderizer-beta",
@@ -147,7 +151,9 @@
         }
       ],
       "series_skill_id": null,
-      "group_skill_id": null
+      "group_skill_id": null,
+      "allows_series_skill_assignment": false,
+      "allows_group_skill_assignment": false
     },
     {
       "equipment_id": "fixture:chest:power-mail",
@@ -165,7 +171,9 @@
         }
       ],
       "series_skill_id": "skill:fixture-series-bonus",
-      "group_skill_id": "skill:fixture-group-bonus"
+      "group_skill_id": "skill:fixture-group-bonus",
+      "allows_series_skill_assignment": false,
+      "allows_group_skill_assignment": false
     },
     {
       "equipment_id": "fixture:arms:socket-braces",
@@ -182,7 +190,9 @@
         }
       ],
       "series_skill_id": "skill:fixture-series-bonus",
-      "group_skill_id": "skill:fixture-group-bonus"
+      "group_skill_id": "skill:fixture-group-bonus",
+      "allows_series_skill_assignment": false,
+      "allows_group_skill_assignment": false
     },
     {
       "equipment_id": "fixture:waist:precision-coil",
@@ -195,7 +205,9 @@
       ],
       "slots": [],
       "series_skill_id": "skill:fixture-series-bonus",
-      "group_skill_id": null
+      "group_skill_id": null,
+      "allows_series_skill_assignment": false,
+      "allows_group_skill_assignment": false
     },
     {
       "equipment_id": "fixture:legs:tenderizer-greaves",
@@ -213,7 +225,9 @@
         }
       ],
       "series_skill_id": null,
-      "group_skill_id": null
+      "group_skill_id": null,
+      "allows_series_skill_assignment": false,
+      "allows_group_skill_assignment": false
     },
     {
       "equipment_id": "fixture:charm:power",
@@ -226,7 +240,9 @@
       ],
       "slots": [],
       "series_skill_id": null,
-      "group_skill_id": null
+      "group_skill_id": null,
+      "allows_series_skill_assignment": false,
+      "allows_group_skill_assignment": false
     },
     {
       "equipment_id": "fixture:charm:precision",
@@ -239,7 +255,9 @@
       ],
       "slots": [],
       "series_skill_id": null,
-      "group_skill_id": null
+      "group_skill_id": null,
+      "allows_series_skill_assignment": false,
+      "allows_group_skill_assignment": false
     }
   ],
   "decorations": [

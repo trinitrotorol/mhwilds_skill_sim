@@ -63,6 +63,8 @@ class Catalog:
             seen_skill_ids.add(skill.skill_id)
 
         skills_by_id = {skill.skill_id: skill for skill in self.skills}
+        has_series_skill = any(skill.kind is SkillKind.SERIES for skill in self.skills)
+        has_group_skill = any(skill.kind is SkillKind.GROUP for skill in self.skills)
         for equipment in self.equipment:
             if equipment.series_skill_id is not None:
                 series_skill = skills_by_id.get(equipment.series_skill_id)
@@ -85,3 +87,13 @@ class Catalog:
                     raise ValueError(
                         "equipment group_skill_id must reference a group skill"
                     )
+
+            if equipment.allows_series_skill_assignment and not has_series_skill:
+                raise ValueError(
+                    "equipment allows_series_skill_assignment requires a series skill"
+                )
+
+            if equipment.allows_group_skill_assignment and not has_group_skill:
+                raise ValueError(
+                    "equipment allows_group_skill_assignment requires a group skill"
+                )

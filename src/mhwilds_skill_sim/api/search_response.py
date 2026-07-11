@@ -18,6 +18,8 @@ def build_candidate_to_response(
             {
                 "equipment_id": equipment.equipment_id,
                 "part": equipment.part.value,
+                "series_skill_id": equipment.series_skill_id,
+                "group_skill_id": equipment.group_skill_id,
             }
             for equipment in candidate.equipment
         ],

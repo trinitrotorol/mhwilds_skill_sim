@@ -102,6 +102,15 @@ def response_candidate_skill_levels(candidate: dict[str, object]) -> dict[str, i
     }
 
 
+def response_candidate_equipment_by_part(
+    candidate: dict[str, object],
+    part: str,
+) -> dict[str, object]:
+    equipment = candidate["equipment"]
+    assert isinstance(equipment, list)
+    return next(item for item in equipment if item["part"] == part)
+
+
 def test_empty_catalog_and_empty_requirements_return_response_dict() -> None:
     response = search_catalog_build_candidates_from_payload(
         catalog=empty_catalog(),
@@ -180,6 +189,11 @@ def test_tiny_catalog_handles_series_bonus_requirement_payload() -> None:
         response_candidate_skill_levels(candidate)["skill:fixture-series-bonus"] >= 2
         for candidate in candidates
     )
+    assert all(
+        response_candidate_equipment_by_part(candidate, "weapon")["series_skill_id"]
+        == "skill:fixture-series-bonus"
+        for candidate in candidates
+    )
 
 
 def test_tiny_catalog_handles_group_bonus_requirement_payload() -> None:
@@ -198,6 +212,56 @@ def test_tiny_catalog_handles_group_bonus_requirement_payload() -> None:
         response_candidate_skill_levels(candidate)["skill:fixture-group-bonus"] >= 1
         for candidate in candidates
     )
+    assert all(
+        response_candidate_equipment_by_part(candidate, "weapon")["group_skill_id"]
+        == "skill:fixture-group-bonus"
+        for candidate in candidates
+    )
+
+
+@pytest.mark.parametrize(
+    ("skill_id", "min_level"),
+    [
+        ("skill:fixture-series-bonus", 2),
+        ("skill:fixture-group-bonus", 1),
+    ],
+)
+def test_bonus_requirements_include_both_head_routes_after_artian_assignment(
+    skill_id: str,
+    min_level: int,
+) -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=tiny_catalog(),
+        payload=payload(
+            requirements=[requirement(skill_id, min_level)],
+            max_results=99999,
+        ),
+    )
+
+    candidates = response["candidates"]
+    assert isinstance(candidates, list)
+    assert {
+        response_candidate_equipment_by_part(candidate, "head")["equipment_id"]
+        for candidate in candidates
+    } == {
+        "fixture:head:precision-alpha",
+        "fixture:head:tenderizer-beta",
+    }
+
+
+def test_empty_requirement_response_exposes_resolved_artian_memberships() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=tiny_catalog(),
+        payload=payload(max_results=1),
+    )
+
+    candidates = response["candidates"]
+    assert isinstance(candidates, list)
+    weapon = response_candidate_equipment_by_part(candidates[0], "weapon")
+    assert weapon["equipment_id"] == "fixture:weapon:training-blade"
+    assert weapon["series_skill_id"] == "skill:fixture-series-bonus"
+    assert weapon["group_skill_id"] == "skill:fixture-group-bonus"
+    json.dumps(response)
 
 
 def test_impossible_bonus_level_returns_zero_candidates() -> None:

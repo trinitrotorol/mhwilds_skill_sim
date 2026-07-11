@@ -56,6 +56,8 @@ def equipment(
     slots: tuple[DecorationSlot, ...] | None = None,
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    allows_series_skill_assignment: bool = False,
+    allows_group_skill_assignment: bool = False,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
@@ -64,6 +66,8 @@ def equipment(
         slots=slots if slots is not None else (weapon_slot(1),),
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        allows_series_skill_assignment=allows_series_skill_assignment,
+        allows_group_skill_assignment=allows_group_skill_assignment,
     )
 
 
@@ -83,6 +87,26 @@ def equipment_with_membership_value(
         skills=(skill(),),
         slots=(weapon_slot(1),),
         **memberships,  # type: ignore[arg-type]
+    )
+
+
+def equipment_with_assignment_value(
+    *,
+    field_name: str,
+    value: object,
+    part: EquipmentPart = EquipmentPart.WEAPON,
+) -> EquipmentDefinition:
+    assignments: dict[str, object] = {
+        "allows_series_skill_assignment": False,
+        "allows_group_skill_assignment": False,
+    }
+    assignments[field_name] = value
+    return EquipmentDefinition(
+        equipment_id=f"equipment:{part.value}",
+        part=part,
+        skills=(),
+        slots=(),
+        **assignments,  # type: ignore[arg-type]
     )
 
 
@@ -151,6 +175,8 @@ def test_can_create_weapon_equipment_definition_with_skills_and_slots() -> None:
     assert definition.slots == (weapon_slot(1), weapon_slot(2))
     assert definition.series_skill_id is None
     assert definition.group_skill_id is None
+    assert definition.allows_series_skill_assignment is False
+    assert definition.allows_group_skill_assignment is False
 
 
 def test_can_create_armor_equipment_definition_with_skills_and_slots() -> None:
@@ -184,6 +210,102 @@ def test_legacy_four_argument_equipment_construction_defaults_memberships() -> N
 
     assert definition.series_skill_id is None
     assert definition.group_skill_id is None
+    assert definition.allows_series_skill_assignment is False
+    assert definition.allows_group_skill_assignment is False
+
+
+def test_equipment_definition_accepts_series_assignment_capable_weapon() -> None:
+    definition = equipment(allows_series_skill_assignment=True)
+
+    assert definition.allows_series_skill_assignment is True
+    assert definition.allows_group_skill_assignment is False
+
+
+def test_equipment_definition_accepts_group_assignment_capable_weapon() -> None:
+    definition = equipment(allows_group_skill_assignment=True)
+
+    assert definition.allows_series_skill_assignment is False
+    assert definition.allows_group_skill_assignment is True
+
+
+def test_equipment_definition_accepts_dual_assignment_capable_weapon() -> None:
+    definition = equipment(
+        allows_series_skill_assignment=True,
+        allows_group_skill_assignment=True,
+    )
+
+    assert definition.allows_series_skill_assignment is True
+    assert definition.allows_group_skill_assignment is True
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["allows_series_skill_assignment", "allows_group_skill_assignment"],
+)
+@pytest.mark.parametrize("value", [0, 1, "true", None, [], object()])
+def test_equipment_definition_rejects_non_bool_assignment_flags(
+    field_name: str,
+    value: object,
+) -> None:
+    with pytest.raises(TypeError, match=field_name):
+        equipment_with_assignment_value(field_name=field_name, value=value)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["allows_series_skill_assignment", "allows_group_skill_assignment"],
+)
+@pytest.mark.parametrize(
+    "part",
+    [
+        EquipmentPart.HEAD,
+        EquipmentPart.CHEST,
+        EquipmentPart.ARMS,
+        EquipmentPart.WAIST,
+        EquipmentPart.LEGS,
+        EquipmentPart.CHARM,
+    ],
+)
+def test_equipment_definition_rejects_assignment_capability_on_non_weapon(
+    field_name: str,
+    part: EquipmentPart,
+) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        equipment_with_assignment_value(field_name=field_name, value=True, part=part)
+
+
+def test_equipment_definition_rejects_fixed_series_and_series_assignment() -> None:
+    with pytest.raises(
+        ValueError,
+        match="allows_series_skill_assignment.*series_skill_id",
+    ):
+        equipment(
+            series_skill_id="skill:series-bonus",
+            allows_series_skill_assignment=True,
+        )
+
+
+def test_equipment_definition_rejects_fixed_group_and_group_assignment() -> None:
+    with pytest.raises(
+        ValueError,
+        match="allows_group_skill_assignment.*group_skill_id",
+    ):
+        equipment(
+            group_skill_id="skill:group-bonus",
+            allows_group_skill_assignment=True,
+        )
+
+
+def test_fixed_membership_weapon_with_assignment_flags_false_remains_valid() -> None:
+    definition = equipment(
+        series_skill_id="skill:series-bonus",
+        group_skill_id="skill:group-bonus",
+    )
+
+    assert definition.series_skill_id == "skill:series-bonus"
+    assert definition.group_skill_id == "skill:group-bonus"
+    assert definition.allows_series_skill_assignment is False
+    assert definition.allows_group_skill_assignment is False
 
 
 def test_equipment_definition_accepts_series_only_membership() -> None:
@@ -288,6 +410,8 @@ def test_equipment_definitions_with_same_values_are_equal() -> None:
         equipment(slots=(weapon_slot(2),)),
         equipment(series_skill_id="skill:fixture-series-bonus"),
         equipment(group_skill_id="skill:fixture-group-bonus"),
+        equipment(allows_series_skill_assignment=True),
+        equipment(allows_group_skill_assignment=True),
     ],
 )
 def test_equipment_definitions_with_different_values_are_not_equal(
@@ -319,6 +443,25 @@ def test_equipment_definition_equality_and_hash_include_memberships() -> None:
     assert len({equipment(), with_memberships}) == 2
 
 
+def test_equipment_definition_equality_and_hash_include_assignment_flags() -> None:
+    assignment_template = equipment(
+        allows_series_skill_assignment=True,
+        allows_group_skill_assignment=True,
+    )
+
+    assert assignment_template == equipment(
+        allows_series_skill_assignment=True,
+        allows_group_skill_assignment=True,
+    )
+    assert hash(assignment_template) == hash(
+        equipment(
+            allows_series_skill_assignment=True,
+            allows_group_skill_assignment=True,
+        )
+    )
+    assert len({equipment(), assignment_template}) == 2
+
+
 def test_equipment_definition_fields_cannot_be_reassigned() -> None:
     definition = equipment()
 
@@ -332,6 +475,17 @@ def test_equipment_membership_fields_cannot_be_reassigned(field_name: str) -> No
 
     with pytest.raises(FrozenInstanceError):
         setattr(definition, field_name, "skill:fixture-bonus")
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["allows_series_skill_assignment", "allows_group_skill_assignment"],
+)
+def test_equipment_assignment_flags_cannot_be_reassigned(field_name: str) -> None:
+    definition = equipment()
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(definition, field_name, True)
 
 
 @pytest.mark.parametrize("field_name", ["series_skill_id", "group_skill_id"])

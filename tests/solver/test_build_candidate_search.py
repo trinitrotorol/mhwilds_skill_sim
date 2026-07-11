@@ -56,6 +56,8 @@ def equipment_definition(
     slots: tuple[DecorationSlot, ...] = (),
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    allows_series_skill_assignment: bool = False,
+    allows_group_skill_assignment: bool = False,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
@@ -64,6 +66,8 @@ def equipment_definition(
         slots=slots,
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        allows_series_skill_assignment=allows_series_skill_assignment,
+        allows_group_skill_assignment=allows_group_skill_assignment,
     )
 
 
@@ -84,6 +88,8 @@ def complete_equipment(
     group_parts: tuple[EquipmentPart, ...] = (),
     series_skill_id: str = "skill:series-bonus",
     group_skill_id: str = "skill:group-bonus",
+    weapon_allows_series_skill_assignment: bool = False,
+    weapon_allows_group_skill_assignment: bool = False,
 ) -> tuple[EquipmentDefinition, ...]:
     equipment_ids = {
         EquipmentPart.WEAPON: weapon_id,
@@ -111,6 +117,16 @@ def complete_equipment(
             slots=weapon_slots if part is EquipmentPart.WEAPON else (),
             series_skill_id=series_skill_id if part in series_parts else None,
             group_skill_id=group_skill_id if part in group_parts else None,
+            allows_series_skill_assignment=(
+                weapon_allows_series_skill_assignment
+                if part is EquipmentPart.WEAPON
+                else False
+            ),
+            allows_group_skill_assignment=(
+                weapon_allows_group_skill_assignment
+                if part is EquipmentPart.WEAPON
+                else False
+            ),
         )
         for part in REQUIRED_PARTS
     )
@@ -143,6 +159,22 @@ def group_skill_definition(
     thresholds: tuple[int, ...] = (3,),
 ) -> SkillDefinition:
     return bonus_skill_definition(skill_id, SkillKind.GROUP, thresholds)
+
+
+def artian_skill_definitions() -> tuple[SkillDefinition, ...]:
+    return (
+        series_skill_definition("skill:series-a", (1,)),
+        series_skill_definition("skill:series-b", (1,)),
+        group_skill_definition("skill:group-a", (1,)),
+        group_skill_definition("skill:group-b", (1,)),
+    )
+
+
+def artian_equipment() -> tuple[EquipmentDefinition, ...]:
+    return complete_equipment(
+        weapon_allows_series_skill_assignment=True,
+        weapon_allows_group_skill_assignment=True,
+    )
 
 
 def two_head_equipment(
@@ -326,6 +358,86 @@ def test_direct_search_can_satisfy_group_skill_requirement() -> None:
 
     assert len(result) == 1
     assert dict(result[0].skill_levels)["skill:group-bonus"] == 1
+
+
+def test_series_requirement_selects_generated_series_variants() -> None:
+    result = search_candidates(
+        equipment=artian_equipment(),
+        decorations=(),
+        requirements=(requirement("skill:series-b", 1),),
+        skill_definitions=artian_skill_definitions(),
+    )
+
+    assert [
+        (candidate.equipment[0].series_skill_id, candidate.equipment[0].group_skill_id)
+        for candidate in result
+    ] == [
+        ("skill:series-b", "skill:group-a"),
+        ("skill:series-b", "skill:group-b"),
+    ]
+
+
+def test_group_requirement_selects_generated_group_variants() -> None:
+    result = search_candidates(
+        equipment=artian_equipment(),
+        decorations=(),
+        requirements=(requirement("skill:group-b", 1),),
+        skill_definitions=artian_skill_definitions(),
+    )
+
+    assert [
+        (candidate.equipment[0].series_skill_id, candidate.equipment[0].group_skill_id)
+        for candidate in result
+    ] == [
+        ("skill:series-a", "skill:group-b"),
+        ("skill:series-b", "skill:group-b"),
+    ]
+
+
+def test_simultaneous_requirements_select_generated_combination() -> None:
+    result = search_candidates(
+        equipment=artian_equipment(),
+        decorations=(),
+        requirements=(
+            requirement("skill:series-b", 1),
+            requirement("skill:group-a", 1),
+        ),
+        skill_definitions=artian_skill_definitions(),
+    )
+
+    assert len(result) == 1
+    assert result[0].equipment[0].series_skill_id == "skill:series-b"
+    assert result[0].equipment[0].group_skill_id == "skill:group-a"
+
+
+def test_generated_variant_search_order_is_deterministic() -> None:
+    result = search_candidates(
+        equipment=artian_equipment(),
+        decorations=(),
+        requirements=(),
+        skill_definitions=artian_skill_definitions(),
+    )
+
+    assert [
+        (candidate.equipment[0].series_skill_id, candidate.equipment[0].group_skill_id)
+        for candidate in result
+    ] == [
+        ("skill:series-a", "skill:group-a"),
+        ("skill:series-a", "skill:group-b"),
+        ("skill:series-b", "skill:group-a"),
+        ("skill:series-b", "skill:group-b"),
+    ]
+
+
+def test_nonmatching_generated_variant_requirement_returns_empty() -> None:
+    result = search_candidates(
+        equipment=artian_equipment(),
+        decorations=(),
+        requirements=(requirement("skill:series-missing", 1),),
+        skill_definitions=artian_skill_definitions(),
+    )
+
+    assert result == ()
 
 
 def test_omitting_skill_definitions_preserves_legacy_no_membership_search() -> None:

@@ -125,6 +125,14 @@ def selected_head_id(candidate: BuildCandidate) -> str:
     )
 
 
+def selected_weapon(candidate: BuildCandidate) -> EquipmentDefinition:
+    return next(
+        equipment
+        for equipment in candidate.equipment
+        if equipment.part is EquipmentPart.WEAPON
+    )
+
+
 def test_empty_catalog_and_empty_requirements_returns_empty_tuple() -> None:
     catalog = Catalog(schema_version=1, equipment=(), decorations=())
 
@@ -151,16 +159,28 @@ def test_all_tiny_catalog_candidates_expose_expected_bonus_levels() -> None:
     assert result
     for candidate in result:
         skill_levels = dict(candidate.skill_levels)
-        if selected_head_id(candidate) == "fixture:head:precision-alpha":
-            assert skill_levels["skill:fixture-series-bonus"] == 2
-            assert skill_levels["skill:fixture-group-bonus"] == 1
-        else:
-            assert selected_head_id(candidate) == "fixture:head:tenderizer-beta"
-            assert skill_levels["skill:fixture-series-bonus"] == 1
-            assert "skill:fixture-group-bonus" not in skill_levels
+        assert selected_head_id(candidate) in {
+            "fixture:head:precision-alpha",
+            "fixture:head:tenderizer-beta",
+        }
+        assert skill_levels["skill:fixture-series-bonus"] == 2
+        assert skill_levels["skill:fixture-group-bonus"] == 1
 
 
-def test_series_level_two_requirement_returns_only_alpha_head_route() -> None:
+def test_all_tiny_catalog_candidates_contain_resolved_training_blade_variant() -> None:
+    result = catalog_search(catalog=tiny_catalog(), requirements=())
+
+    assert result
+    for candidate in result:
+        weapon = selected_weapon(candidate)
+        assert weapon.equipment_id == "fixture:weapon:training-blade"
+        assert weapon.series_skill_id == "skill:fixture-series-bonus"
+        assert weapon.group_skill_id == "skill:fixture-group-bonus"
+        assert weapon.allows_series_skill_assignment is False
+        assert weapon.allows_group_skill_assignment is False
+
+
+def test_series_level_two_requirement_includes_both_head_routes() -> None:
     result = catalog_search(
         catalog=tiny_catalog(),
         requirements=(requirement("skill:fixture-series-bonus", 2),),
@@ -168,11 +188,12 @@ def test_series_level_two_requirement_returns_only_alpha_head_route() -> None:
 
     assert result
     assert {selected_head_id(candidate) for candidate in result} == {
-        "fixture:head:precision-alpha"
+        "fixture:head:precision-alpha",
+        "fixture:head:tenderizer-beta",
     }
 
 
-def test_group_level_one_requirement_returns_only_alpha_head_route() -> None:
+def test_group_level_one_requirement_includes_both_head_routes() -> None:
     result = catalog_search(
         catalog=tiny_catalog(),
         requirements=(requirement("skill:fixture-group-bonus", 1),),
@@ -180,7 +201,8 @@ def test_group_level_one_requirement_returns_only_alpha_head_route() -> None:
 
     assert result
     assert {selected_head_id(candidate) for candidate in result} == {
-        "fixture:head:precision-alpha"
+        "fixture:head:precision-alpha",
+        "fixture:head:tenderizer-beta",
     }
 
 
@@ -196,7 +218,7 @@ def test_series_level_one_requirement_includes_both_head_routes() -> None:
     }
 
 
-def test_beta_head_empty_placement_candidate_has_only_lower_series_bonus() -> None:
+def test_beta_head_empty_placement_candidate_has_artian_boosted_bonuses() -> None:
     candidate = next(
         candidate
         for candidate in catalog_search(catalog=tiny_catalog(), requirements=())
@@ -204,8 +226,8 @@ def test_beta_head_empty_placement_candidate_has_only_lower_series_bonus() -> No
         and candidate.placements == ()
     )
 
-    assert dict(candidate.skill_levels)["skill:fixture-series-bonus"] == 1
-    assert "skill:fixture-group-bonus" not in dict(candidate.skill_levels)
+    assert dict(candidate.skill_levels)["skill:fixture-series-bonus"] == 2
+    assert dict(candidate.skill_levels)["skill:fixture-group-bonus"] == 1
 
 
 def test_alpha_head_empty_placement_candidate_has_both_bonus_skills() -> None:
@@ -407,10 +429,10 @@ def test_catalog_subclass_uses_bonus_skill_definitions() -> None:
     )
 
     assert result
-    assert all(
-        selected_head_id(candidate) == "fixture:head:precision-alpha"
-        for candidate in result
-    )
+    assert {selected_head_id(candidate) for candidate in result} == {
+        "fixture:head:precision-alpha",
+        "fixture:head:tenderizer-beta",
+    }
 
 
 def test_propagates_requirement_list_type_error() -> None:

@@ -11,6 +11,9 @@ from mhwilds_skill_sim.solver.decoration import (
     enumerate_decoration_placement_combinations,
 )
 from mhwilds_skill_sim.solver.equipment import enumerate_equipment_selections
+from mhwilds_skill_sim.solver.equipment_variants import (
+    expand_equipment_bonus_skill_variants,
+)
 from mhwilds_skill_sim.validation.build import aggregate_valid_build_skill_levels
 from mhwilds_skill_sim.validation.placement import DecorationPlacement
 
@@ -39,8 +42,13 @@ def enumerate_build_candidates(
     _validate_unique_equipment_ids(equipment=equipment)
     _validate_unique_decoration_ids(decorations=decorations)
 
+    expanded_equipment = expand_equipment_bonus_skill_variants(
+        equipment=equipment,
+        skill_definitions=skill_definitions,
+    )
+
     candidates: list[BuildCandidate] = []
-    for selection in enumerate_equipment_selections(equipment=equipment):
+    for selection in enumerate_equipment_selections(equipment=expanded_equipment):
         for placements in enumerate_decoration_placement_combinations(
             equipment=selection,
             decorations=decorations,

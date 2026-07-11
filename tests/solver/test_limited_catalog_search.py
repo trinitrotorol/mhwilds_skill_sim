@@ -394,6 +394,34 @@ def test_bonus_requirements_are_filtered_before_limiting(
     )
 
 
+def test_limited_catalog_search_returns_resolved_artian_weapon_variants() -> None:
+    catalog = tiny_catalog()
+    requirements = (requirement("skill:fixture-group-bonus", 1),)
+    all_matching = search_catalog_build_candidates_by_skill_requirements(
+        catalog=catalog,
+        requirements=requirements,
+    )
+
+    result = limited_search(
+        catalog=catalog,
+        requirements=requirements,
+        max_results=3,
+    )
+
+    assert result.candidates == all_matching[:3]
+    assert result.total_count == len(all_matching)
+    for candidate in result.candidates:
+        weapon = next(
+            equipment
+            for equipment in candidate.equipment
+            if equipment.part is EquipmentPart.WEAPON
+        )
+        assert weapon.series_skill_id == "skill:fixture-series-bonus"
+        assert weapon.group_skill_id == "skill:fixture-group-bonus"
+        assert weapon.allows_series_skill_assignment is False
+        assert weapon.allows_group_skill_assignment is False
+
+
 def test_returns_build_candidate_search_result() -> None:
     result = limited_search(catalog=tiny_catalog(), requirements=(), max_results=1)
 
