@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib
 import inspect
 import json
@@ -12,10 +13,13 @@ from typing import Any
 import pytest
 from fastapi import FastAPI, HTTPException
 
+from mhwilds_skill_sim.api.app import app, create_app
+from mhwilds_skill_sim.api.catalog_response import (
+    build_catalog_metadata_response,
+)
 from mhwilds_skill_sim.api.search_service import (
     search_catalog_build_candidates_from_payload,
 )
-from mhwilds_skill_sim.api.app import app, create_app
 from mhwilds_skill_sim.catalog.loader import load_catalog
 from mhwilds_skill_sim.catalog.model import Catalog
 
@@ -203,6 +207,117 @@ def test_health_route_is_in_openapi_schema() -> None:
     assert "get" in schema["paths"]["/health"]
 
 
+def test_catalog_metadata_route_is_get_only_without_request_body() -> None:
+    application = create_app()
+    route = route_for_path(application, "/catalog/metadata")
+    operation = application.openapi()["paths"]["/catalog/metadata"]
+
+    assert "GET" in route.methods
+    assert "POST" not in route.methods
+    assert route.body_field is None
+    assert "get" in operation
+    assert "post" not in operation
+    assert "requestBody" not in operation["get"]
+
+
+def test_catalog_metadata_endpoint_uses_injected_catalog() -> None:
+    catalog = tiny_catalog()
+    catalog_before = copy.deepcopy(catalog)
+    application = create_app(catalog=catalog)
+    route = route_for_path(application, "/catalog/metadata")
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+    )
+
+    assert isinstance(response, dict)
+    assert response == build_catalog_metadata_response(catalog=catalog)
+    json.dumps(response)
+    assert application.state.catalog is catalog
+    assert catalog == catalog_before
+
+
+def test_catalog_metadata_endpoint_uses_manually_assigned_catalog() -> None:
+    catalog = tiny_catalog()
+    application = create_app()
+    application.state.catalog = catalog
+    route = route_for_path(application, "/catalog/metadata")
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+    )
+
+    assert response == build_catalog_metadata_response(catalog=catalog)
+
+
+def test_catalog_metadata_endpoint_accepts_catalog_subclass() -> None:
+    class CatalogSubclass(Catalog):
+        pass
+
+    catalog = CatalogSubclass(schema_version=1, equipment=(), decorations=())
+    application = create_app(catalog=catalog)
+    route = route_for_path(application, "/catalog/metadata")
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+    )
+
+    assert response == build_catalog_metadata_response(catalog=catalog)
+
+
+def test_catalog_metadata_endpoint_stays_read_only() -> None:
+    route = route_for_path(create_app(), "/catalog/metadata")
+    source = inspect.getsource(route.endpoint).lower()
+
+    for forbidden in (
+        "load_catalog",
+        "synchroniz",
+        "search_catalog",
+        "solver",
+        "pathlib",
+        "read_text",
+        "read_bytes",
+        "open(",
+    ):
+        assert forbidden not in source
+
+
+@pytest.mark.parametrize(
+    "configure_invalid_catalog",
+    [False, True],
+    ids=["missing", "invalid"],
+)
+def test_catalog_metadata_catalog_errors_exactly_match_search(
+    configure_invalid_catalog: bool,
+) -> None:
+    application = create_app()
+    if configure_invalid_catalog:
+        application.state.catalog = "catalog"
+
+    metadata_route = route_for_path(application, "/catalog/metadata")
+    search_route = route_for_path(application, "/search")
+
+    with pytest.raises(HTTPException) as metadata_exc_info:
+        call_route_endpoint(
+            metadata_route,
+            request=fake_request(application),
+        )
+    with pytest.raises(HTTPException) as search_exc_info:
+        call_route_endpoint(
+            search_route,
+            request=fake_request(application),
+            payload=valid_search_payload(),
+        )
+
+    assert metadata_exc_info.value.status_code == 503
+    assert metadata_exc_info.value.detail == "catalog is not configured"
+    assert search_exc_info.value.status_code == metadata_exc_info.value.status_code
+    assert search_exc_info.value.detail == metadata_exc_info.value.detail
+
+
 def test_search_post_route_exists() -> None:
     route = route_for_path(create_app(), "/search")
 
@@ -377,15 +492,25 @@ def test_injected_catalog_does_not_change_health_or_openapi_behavior() -> None:
 def test_module_level_app_has_no_catalog_configured() -> None:
     assert not hasattr(app.state, "catalog")
 
-    route = route_for_path(app, "/search")
-    with pytest.raises(HTTPException) as exc_info:
+    search_route = route_for_path(app, "/search")
+    with pytest.raises(HTTPException) as search_exc_info:
         call_route_endpoint(
-            route,
+            search_route,
             request=fake_request(app),
             payload=valid_search_payload(),
         )
 
-    assert exc_info.value.status_code == 503
+    metadata_route = route_for_path(app, "/catalog/metadata")
+    with pytest.raises(HTTPException) as metadata_exc_info:
+        call_route_endpoint(
+            metadata_route,
+            request=fake_request(app),
+        )
+
+    assert search_exc_info.value.status_code == 503
+    assert search_exc_info.value.detail == "catalog is not configured"
+    assert metadata_exc_info.value.status_code == 503
+    assert metadata_exc_info.value.detail == "catalog is not configured"
 
 
 def test_app_source_stays_minimal() -> None:
@@ -395,6 +520,11 @@ def test_app_source_stays_minimal() -> None:
     assert "load_catalog" not in source
     assert "uvicorn" not in lowered_source
     assert "os.environ" not in source
+    assert "getenv" not in lowered_source
+    assert "pathlib" not in lowered_source
+    assert "read_text" not in lowered_source
+    assert "read_bytes" not in lowered_source
+    assert "open(" not in lowered_source
     assert "basemodel" not in lowered_source
     assert "pydantic" not in lowered_source
     assert "APIRouter" not in source
