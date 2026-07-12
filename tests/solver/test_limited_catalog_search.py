@@ -13,7 +13,11 @@ from mhwilds_skill_sim.domain.appraisal import (
     AppraisalCharmPatternDefinition,
     AppraisalCharmSkillGroupDefinition,
 )
-from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
+from mhwilds_skill_sim.domain.equipment import (
+    EquipmentDefinition,
+    EquipmentPart,
+    WeaponKind,
+)
 from mhwilds_skill_sim.domain.skill import (
     SkillContribution,
     SkillDefinition,
@@ -64,23 +68,27 @@ def equipment_definition(
     equipment_id: str | None = None,
     *,
     skills: tuple[SkillContribution, ...] = (),
+    weapon_kind: WeaponKind | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
         part=part,
         skills=skills,
         slots=(),
+        weapon_kind=weapon_kind,
     )
 
 
 def complete_equipment(
     *,
     weapon_skills: tuple[SkillContribution, ...] = (),
+    weapon_kind: WeaponKind | None = None,
 ) -> tuple[EquipmentDefinition, ...]:
     return tuple(
         equipment_definition(
             part,
             skills=weapon_skills if part is EquipmentPart.WEAPON else (),
+            weapon_kind=weapon_kind if part is EquipmentPart.WEAPON else None,
         )
         for part in REQUIRED_PARTS
     )
@@ -122,6 +130,28 @@ def manual_catalog() -> Catalog:
         schema_version=1,
         equipment=complete_equipment(
             weapon_skills=(skill("skill:attack-boost", 1),),
+        ),
+        decorations=(),
+    )
+
+
+def weapon_kind_catalog() -> Catalog:
+    base_equipment = complete_equipment(weapon_kind=WeaponKind.GREAT_SWORD)
+    return Catalog(
+        schema_version=1,
+        equipment=(
+            base_equipment[0],
+            equipment_definition(
+                EquipmentPart.WEAPON,
+                "equipment:great-sword-alternate",
+                weapon_kind=WeaponKind.GREAT_SWORD,
+            ),
+            equipment_definition(
+                EquipmentPart.WEAPON,
+                "equipment:bow",
+                weapon_kind=WeaponKind.BOW,
+            ),
+            *base_equipment[1:],
         ),
         decorations=(),
     )
@@ -176,11 +206,21 @@ def limited_search(
     catalog: Catalog,
     requirements: tuple[SkillRequirement, ...],
     max_results: int,
+    weapon_kind: WeaponKind | None = None,
 ) -> BuildCandidateSearchResult:
     return search_limited_catalog_build_candidates_by_skill_requirements(
         catalog=catalog,
         requirements=requirements,
         max_results=max_results,
+        weapon_kind=weapon_kind,
+    )
+
+
+def selected_weapon(candidate: BuildCandidate) -> EquipmentDefinition:
+    return next(
+        equipment
+        for equipment in candidate.equipment
+        if equipment.part is EquipmentPart.WEAPON
     )
 
 
@@ -358,6 +398,59 @@ def test_one_result_limit_returns_one_candidate_and_total_count() -> None:
     assert result.truncated is True
 
 
+def test_weapon_kind_filtering_occurs_before_total_count_and_limiting() -> None:
+    catalog = weapon_kind_catalog()
+    full = search_catalog_build_candidates_by_skill_requirements(
+        catalog=catalog,
+        requirements=(),
+        weapon_kind=WeaponKind.GREAT_SWORD,
+    )
+
+    result = limited_search(
+        catalog=catalog,
+        requirements=(),
+        max_results=1,
+        weapon_kind=WeaponKind.GREAT_SWORD,
+    )
+
+    assert len(full) == 2
+    assert result.candidates == full[:1]
+    assert result.total_count == len(full)
+    assert result.truncated is True
+    assert selected_weapon(result.candidates[0]).weapon_kind is WeaponKind.GREAT_SWORD
+
+
+def test_no_matching_weapon_kind_returns_empty_untruncated_result() -> None:
+    result = limited_search(
+        catalog=weapon_kind_catalog(),
+        requirements=(),
+        max_results=1,
+        weapon_kind=WeaponKind.HAMMER,
+    )
+
+    assert result == BuildCandidateSearchResult(
+        candidates=(),
+        total_count=0,
+        truncated=False,
+    )
+
+
+def test_default_weapon_kind_preserves_existing_limited_search_behavior() -> None:
+    catalog = weapon_kind_catalog()
+
+    omitted = limited_search(catalog=catalog, requirements=(), max_results=2)
+    explicit_none = limited_search(
+        catalog=catalog,
+        requirements=(),
+        max_results=2,
+        weapon_kind=None,
+    )
+
+    assert omitted == explicit_none
+    assert omitted.total_count == 3
+    assert omitted.truncated is True
+
+
 def test_limit_equal_to_total_count_returns_all_candidates() -> None:
     catalog = tiny_catalog()
     all_candidates = search_catalog_build_candidates_by_skill_requirements(
@@ -489,6 +582,8 @@ def test_limited_search_requires_keyword_arguments() -> None:
     assert signature.parameters["catalog"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["requirements"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["max_results"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["weapon_kind"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["weapon_kind"].default is None
 
     with pytest.raises(TypeError):
         search_limited_catalog_build_candidates_by_skill_requirements(
@@ -584,6 +679,16 @@ def test_propagates_invalid_catalog_type_error() -> None:
             catalog="catalog",  # type: ignore[arg-type]
             requirements=(),
             max_results=1,
+        )
+
+
+def test_propagates_invalid_weapon_kind_type_error() -> None:
+    with pytest.raises(TypeError, match="weapon_kind"):
+        search_limited_catalog_build_candidates_by_skill_requirements(
+            catalog=weapon_kind_catalog(),
+            requirements=(),
+            max_results=1,
+            weapon_kind="great-sword",  # type: ignore[arg-type]
         )
 
 

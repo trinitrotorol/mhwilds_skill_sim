@@ -12,7 +12,11 @@ from mhwilds_skill_sim.api.search_response import (
     build_candidate_search_result_to_response,
     build_candidate_to_response,
 )
-from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
+from mhwilds_skill_sim.domain.equipment import (
+    EquipmentDefinition,
+    EquipmentPart,
+    WeaponKind,
+)
 from mhwilds_skill_sim.domain.skill import SkillContribution
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 from mhwilds_skill_sim.solver.build import BuildCandidate
@@ -28,6 +32,8 @@ def equipment_definition(
     group_skill_id: str | None = None,
     skills: tuple[SkillContribution, ...] = (),
     slots: tuple[DecorationSlot, ...] = (),
+    display_name: str | None = None,
+    weapon_kind: WeaponKind | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
@@ -36,6 +42,8 @@ def equipment_definition(
         slots=slots,
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        display_name=display_name,
+        weapon_kind=weapon_kind,
     )
 
 
@@ -81,7 +89,12 @@ def response_contains_unserializable_value(value: object) -> bool:
 def test_build_candidate_to_response_converts_candidate_to_dict() -> None:
     build = candidate(
         equipment=(
-            equipment_definition(EquipmentPart.WEAPON, "equipment:weapon"),
+            equipment_definition(
+                EquipmentPart.WEAPON,
+                "equipment:weapon",
+                display_name="Training Great Sword",
+                weapon_kind=WeaponKind.GREAT_SWORD,
+            ),
             equipment_definition(EquipmentPart.HEAD, "equipment:head"),
         ),
         placements=(
@@ -100,7 +113,9 @@ def test_build_candidate_to_response_converts_candidate_to_dict() -> None:
         "equipment": [
             {
                 "equipment_id": "equipment:weapon",
+                "display_name": "Training Great Sword",
                 "part": "weapon",
+                "weapon_kind": "great-sword",
                 "series_skill_id": None,
                 "group_skill_id": None,
                 "skills": [],
@@ -108,7 +123,9 @@ def test_build_candidate_to_response_converts_candidate_to_dict() -> None:
             },
             {
                 "equipment_id": "equipment:head",
+                "display_name": None,
                 "part": "head",
+                "weapon_kind": None,
                 "series_skill_id": None,
                 "group_skill_id": None,
                 "skills": [],
@@ -148,7 +165,9 @@ def test_build_candidate_to_response_key_order() -> None:
     assert list(response) == ["equipment", "placements", "skill_levels"]
     assert list(response["equipment"][0]) == [  # type: ignore[index]
         "equipment_id",
+        "display_name",
         "part",
+        "weapon_kind",
         "series_skill_id",
         "group_skill_id",
         "skills",
@@ -172,7 +191,9 @@ def test_build_candidate_to_response_uses_equipment_part_value() -> None:
     assert response["equipment"] == [
         {
             "equipment_id": "equipment:charm",
+            "display_name": None,
             "part": "charm",
+            "weapon_kind": None,
             "series_skill_id": None,
             "group_skill_id": None,
             "skills": [],
@@ -201,7 +222,9 @@ def test_build_candidate_to_response_serializes_membership_values() -> None:
     assert response["equipment"] == [
         {
             "equipment_id": "equipment:weapon",
+            "display_name": None,
             "part": "weapon",
+            "weapon_kind": None,
             "series_skill_id": "skill:series-bonus",
             "group_skill_id": "skill:group-bonus",
             "skills": [],
@@ -209,7 +232,9 @@ def test_build_candidate_to_response_serializes_membership_values() -> None:
         },
         {
             "equipment_id": "equipment:head",
+            "display_name": None,
             "part": "head",
+            "weapon_kind": None,
             "series_skill_id": None,
             "group_skill_id": None,
             "skills": [],
@@ -228,6 +253,8 @@ def test_same_equipment_id_variants_serialize_with_distinct_memberships() -> Non
                             equipment_id="equipment:weapon:artian",
                             series_skill_id="skill:series-a",
                             group_skill_id="skill:group-a",
+                            display_name="Artian Bow",
+                            weapon_kind=WeaponKind.BOW,
                         ),
                     ),
                 ),
@@ -237,6 +264,8 @@ def test_same_equipment_id_variants_serialize_with_distinct_memberships() -> Non
                             equipment_id="equipment:weapon:artian",
                             series_skill_id="skill:series-b",
                             group_skill_id="skill:group-b",
+                            display_name="Artian Bow",
+                            weapon_kind=WeaponKind.BOW,
                         ),
                     ),
                 ),
@@ -255,6 +284,8 @@ def test_same_equipment_id_variants_serialize_with_distinct_memberships() -> Non
     )
     assert equipment_responses[0]["series_skill_id"] == "skill:series-a"
     assert equipment_responses[1]["series_skill_id"] == "skill:series-b"
+    assert equipment_responses[0]["display_name"] == "Artian Bow"
+    assert equipment_responses[1]["weapon_kind"] == "bow"
     assert "allows_series_skill_assignment" not in equipment_responses[0]
     assert "allows_group_skill_assignment" not in equipment_responses[0]
 
@@ -284,7 +315,9 @@ def test_build_candidate_to_response_serializes_fixed_equipment_skills_and_slots
     assert response["equipment"] == [
         {
             "equipment_id": "equipment:head:fixed",
+            "display_name": None,
             "part": "head",
+            "weapon_kind": None,
             "series_skill_id": None,
             "group_skill_id": None,
             "skills": [
@@ -321,6 +354,8 @@ def test_build_candidate_to_response_serializes_generated_appraisal_charm() -> N
 
     charm = response["equipment"][0]  # type: ignore[index]
     assert charm["part"] == "charm"
+    assert charm["display_name"] is None
+    assert charm["weapon_kind"] is None
     assert charm["skills"] == [
         {"skill_id": "skill:attack-boost", "level": 3},
         {"skill_id": "skill:weapon-technique", "level": 1},

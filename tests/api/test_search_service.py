@@ -20,6 +20,11 @@ from mhwilds_skill_sim.api.search_service import (
 )
 from mhwilds_skill_sim.catalog.loader import load_catalog
 from mhwilds_skill_sim.catalog.model import Catalog
+from mhwilds_skill_sim.domain.equipment import (
+    EquipmentDefinition,
+    EquipmentPart,
+    WeaponKind,
+)
 from mhwilds_skill_sim.solver.search_result import (
     search_limited_catalog_build_candidates_by_skill_requirements,
 )
@@ -51,6 +56,62 @@ def tiny_catalog() -> Catalog:
     return load_catalog(path=FIXTURE_PATH)
 
 
+def equipment_definition(
+    *,
+    equipment_id: str,
+    part: EquipmentPart,
+    display_name: str,
+    weapon_kind: WeaponKind | None = None,
+) -> EquipmentDefinition:
+    return EquipmentDefinition(
+        equipment_id=equipment_id,
+        part=part,
+        skills=(),
+        slots=(),
+        display_name=display_name,
+        weapon_kind=weapon_kind,
+    )
+
+
+def weapon_kind_catalog() -> Catalog:
+    equipment = (
+        equipment_definition(
+            equipment_id="equipment:great-sword:first",
+            part=EquipmentPart.WEAPON,
+            display_name="First Great Sword",
+            weapon_kind=WeaponKind.GREAT_SWORD,
+        ),
+        equipment_definition(
+            equipment_id="equipment:bow",
+            part=EquipmentPart.WEAPON,
+            display_name="Test Bow",
+            weapon_kind=WeaponKind.BOW,
+        ),
+        equipment_definition(
+            equipment_id="equipment:great-sword:second",
+            part=EquipmentPart.WEAPON,
+            display_name="Second Great Sword",
+            weapon_kind=WeaponKind.GREAT_SWORD,
+        ),
+        *(
+            equipment_definition(
+                equipment_id=f"equipment:{part.value}",
+                part=part,
+                display_name=f"Test {part.value}",
+            )
+            for part in (
+                EquipmentPart.HEAD,
+                EquipmentPart.CHEST,
+                EquipmentPart.ARMS,
+                EquipmentPart.WAIST,
+                EquipmentPart.LEGS,
+                EquipmentPart.CHARM,
+            )
+        ),
+    )
+    return Catalog(schema_version=1, equipment=equipment, decorations=())
+
+
 def payload(
     *,
     requirements: list[dict[str, object]] | None = None,
@@ -76,6 +137,7 @@ def expected_response(
         catalog=catalog,
         requirements=request.requirements,
         max_results=request.max_results,
+        weapon_kind=request.weapon_kind,
     )
     return build_candidate_search_result_to_response(result=result)
 
@@ -122,6 +184,96 @@ def test_empty_catalog_and_empty_requirements_return_response_dict() -> None:
         "total_count": 0,
         "truncated": False,
     }
+
+
+def test_weapon_kind_payload_filters_candidates_and_preserves_non_weapons() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=weapon_kind_catalog(),
+        payload={
+            "requirements": [],
+            "max_results": 10,
+            "weapon_kind": "great-sword",
+        },
+    )
+
+    candidates = response["candidates"]
+    assert isinstance(candidates, list)
+    assert response["total_count"] == 2
+    assert response["truncated"] is False
+    assert [
+        response_candidate_equipment_by_part(candidate, "weapon")["equipment_id"]
+        for candidate in candidates
+    ] == [
+        "equipment:great-sword:first",
+        "equipment:great-sword:second",
+    ]
+    assert all(
+        response_candidate_equipment_by_part(candidate, "weapon")["weapon_kind"]
+        == "great-sword"
+        for candidate in candidates
+    )
+    assert all(
+        equipment["weapon_kind"] is None
+        for candidate in candidates
+        for equipment in candidate["equipment"]  # type: ignore[union-attr]
+        if equipment["part"] != "weapon"
+    )
+    assert (
+        response_candidate_equipment_by_part(candidates[0], "weapon")["display_name"]
+        == "First Great Sword"
+    )
+    json.dumps(response)
+
+
+def test_weapon_kind_filtering_precedes_total_count_and_truncation() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=weapon_kind_catalog(),
+        payload={
+            "requirements": [],
+            "max_results": 1,
+            "weapon_kind": "great-sword",
+        },
+    )
+
+    assert len(response["candidates"]) == 1  # type: ignore[arg-type]
+    assert response["total_count"] == 2
+    assert response["truncated"] is True
+
+
+def test_weapon_kind_with_no_matching_weapon_returns_empty_result() -> None:
+    response = search_catalog_build_candidates_from_payload(
+        catalog=weapon_kind_catalog(),
+        payload={
+            "requirements": [],
+            "max_results": 10,
+            "weapon_kind": "hammer",
+        },
+    )
+
+    assert response == {
+        "candidates": [],
+        "total_count": 0,
+        "truncated": False,
+    }
+
+
+def test_omitted_and_null_weapon_kind_preserve_default_behavior() -> None:
+    catalog = weapon_kind_catalog()
+    omitted_response = search_catalog_build_candidates_from_payload(
+        catalog=catalog,
+        payload={"requirements": [], "max_results": 10},
+    )
+    null_response = search_catalog_build_candidates_from_payload(
+        catalog=catalog,
+        payload={
+            "requirements": [],
+            "max_results": 10,
+            "weapon_kind": None,
+        },
+    )
+
+    assert omitted_response == null_response
+    assert omitted_response["total_count"] == 3
 
 
 def test_tiny_catalog_and_empty_requirements_return_response_dict() -> None:
@@ -532,6 +684,30 @@ def test_propagates_invalid_max_results_value_error() -> None:
         search_catalog_build_candidates_from_payload(
             catalog=empty_catalog(),
             payload=payload(max_results=-1),
+        )
+
+
+@pytest.mark.parametrize(
+    ("weapon_kind", "expected_error"),
+    [
+        ("Great-Sword", ValueError),
+        ("great-sword ", ValueError),
+        ("unknown", ValueError),
+        (1, TypeError),
+    ],
+)
+def test_propagates_invalid_weapon_kind_error(
+    weapon_kind: object,
+    expected_error: type[Exception],
+) -> None:
+    with pytest.raises(expected_error, match="weapon_kind"):
+        search_catalog_build_candidates_from_payload(
+            catalog=weapon_kind_catalog(),
+            payload={
+                "requirements": [],
+                "max_results": 1,
+                "weapon_kind": weapon_kind,
+            },
         )
 
 

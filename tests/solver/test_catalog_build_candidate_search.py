@@ -7,9 +7,22 @@ import pytest
 
 from mhwilds_skill_sim.catalog.loader import load_catalog
 from mhwilds_skill_sim.catalog.model import Catalog
+from mhwilds_skill_sim.domain.appraisal import (
+    AppraisalCharmPatternDefinition,
+    AppraisalCharmSkillGroupDefinition,
+)
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
-from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
-from mhwilds_skill_sim.domain.skill import SkillContribution
+from mhwilds_skill_sim.domain.equipment import (
+    EquipmentDefinition,
+    EquipmentPart,
+    WeaponKind,
+)
+from mhwilds_skill_sim.domain.skill import (
+    SkillContribution,
+    SkillDefinition,
+    SkillKind,
+    SkillRankDefinition,
+)
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 from mhwilds_skill_sim.solver import (
     BuildCandidate,
@@ -58,12 +71,18 @@ def equipment_definition(
     *,
     skills: tuple[SkillContribution, ...] = (),
     slots: tuple[DecorationSlot, ...] = (),
+    allows_series_skill_assignment: bool = False,
+    allows_group_skill_assignment: bool = False,
+    weapon_kind: WeaponKind | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
         part=part,
         skills=skills,
         slots=slots,
+        allows_series_skill_assignment=allows_series_skill_assignment,
+        allows_group_skill_assignment=allows_group_skill_assignment,
+        weapon_kind=weapon_kind,
     )
 
 
@@ -71,12 +90,14 @@ def complete_equipment(
     *,
     weapon_skills: tuple[SkillContribution, ...] = (),
     weapon_slots: tuple[DecorationSlot, ...] = (),
+    weapon_kind: WeaponKind | None = None,
 ) -> tuple[EquipmentDefinition, ...]:
     return tuple(
         equipment_definition(
             part,
             skills=weapon_skills if part is EquipmentPart.WEAPON else (),
             slots=weapon_slots if part is EquipmentPart.WEAPON else (),
+            weapon_kind=weapon_kind if part is EquipmentPart.WEAPON else None,
         )
         for part in REQUIRED_PARTS
     )
@@ -106,14 +127,92 @@ def tiny_catalog() -> Catalog:
     return load_catalog(path=FIXTURE_PATH)
 
 
+def weapon_kind_catalog(*, catalog_type: type[Catalog] = Catalog) -> Catalog:
+    base_equipment = complete_equipment(weapon_kind=WeaponKind.GREAT_SWORD)
+    return catalog_type(
+        schema_version=1,
+        equipment=(
+            base_equipment[0],
+            equipment_definition(
+                EquipmentPart.WEAPON,
+                "equipment:bow",
+                weapon_kind=WeaponKind.BOW,
+            ),
+            base_equipment[1],
+            equipment_definition(EquipmentPart.HEAD, "equipment:head-alternate"),
+            *base_equipment[2:],
+        ),
+        decorations=(),
+    )
+
+
+def weapon_kind_artian_appraisal_catalog() -> Catalog:
+    skills = (
+        SkillDefinition(
+            skill_id="skill:series-bonus",
+            kind=SkillKind.SERIES,
+            ranks=(SkillRankDefinition(level=1, required_pieces=1),),
+        ),
+        SkillDefinition(
+            skill_id="skill:group-bonus",
+            kind=SkillKind.GROUP,
+            ranks=(SkillRankDefinition(level=1, required_pieces=1),),
+        ),
+        SkillDefinition(
+            skill_id="skill:attack-boost",
+            kind=SkillKind.ARMOR,
+            ranks=(SkillRankDefinition(level=1, required_pieces=None),),
+        ),
+    )
+    base_equipment = complete_equipment()
+    return Catalog(
+        schema_version=1,
+        equipment=(
+            equipment_definition(
+                EquipmentPart.WEAPON,
+                "equipment:great-sword-artian",
+                allows_series_skill_assignment=True,
+                allows_group_skill_assignment=True,
+                weapon_kind=WeaponKind.GREAT_SWORD,
+            ),
+            equipment_definition(
+                EquipmentPart.WEAPON,
+                "equipment:bow-artian",
+                allows_series_skill_assignment=True,
+                allows_group_skill_assignment=True,
+                weapon_kind=WeaponKind.BOW,
+            ),
+            *base_equipment[1:],
+        ),
+        decorations=(),
+        skills=skills,
+        appraisal_charm_skill_groups=(
+            AppraisalCharmSkillGroupDefinition(
+                group_id="appraisal-group:A",
+                skills=(skill("skill:attack-boost", 1),),
+            ),
+        ),
+        appraisal_charm_patterns=(
+            AppraisalCharmPatternDefinition(
+                pattern_id="appraisal-pattern:r8-a",
+                rarity=8,
+                skill_group_ids=("appraisal-group:A",),
+                slots=(),
+            ),
+        ),
+    )
+
+
 def catalog_search(
     *,
     catalog: Catalog,
     requirements: tuple[SkillRequirement, ...],
+    weapon_kind: WeaponKind | None = None,
 ) -> tuple[BuildCandidate, ...]:
     return search_catalog_build_candidates_by_skill_requirements(
         catalog=catalog,
         requirements=requirements,
+        weapon_kind=weapon_kind,
     )
 
 
@@ -324,6 +423,115 @@ def test_result_order_matches_existing_search_order() -> None:
     assert result == direct_result
 
 
+def test_default_weapon_kind_keeps_all_catalog_weapons() -> None:
+    catalog = weapon_kind_catalog()
+
+    omitted = catalog_search(catalog=catalog, requirements=())
+    explicit_none = catalog_search(
+        catalog=catalog,
+        requirements=(),
+        weapon_kind=None,
+    )
+
+    assert omitted == explicit_none
+    assert tuple(selected_weapon(candidate).weapon_kind for candidate in omitted) == (
+        WeaponKind.GREAT_SWORD,
+        WeaponKind.GREAT_SWORD,
+        WeaponKind.BOW,
+        WeaponKind.BOW,
+    )
+
+
+@pytest.mark.parametrize(
+    ("weapon_kind", "expected_weapon_id"),
+    [
+        (WeaponKind.GREAT_SWORD, "equipment:weapon"),
+        (WeaponKind.BOW, "equipment:bow"),
+    ],
+)
+def test_catalog_weapon_kind_selects_matching_weapon_and_keeps_armor_choices(
+    weapon_kind: WeaponKind,
+    expected_weapon_id: str,
+) -> None:
+    result = catalog_search(
+        catalog=weapon_kind_catalog(),
+        requirements=(),
+        weapon_kind=weapon_kind,
+    )
+
+    assert len(result) == 2
+    assert all(
+        selected_weapon(candidate).equipment_id == expected_weapon_id
+        and selected_weapon(candidate).weapon_kind is weapon_kind
+        for candidate in result
+    )
+    assert {selected_head_id(candidate) for candidate in result} == {
+        "equipment:head",
+        "equipment:head-alternate",
+    }
+    assert all(
+        {equipment.part for equipment in candidate.equipment} == set(REQUIRED_PARTS)
+        for candidate in result
+    )
+
+
+def test_catalog_weapon_kind_search_matches_direct_search_with_same_kind() -> None:
+    catalog = weapon_kind_catalog()
+
+    catalog_result = catalog_search(
+        catalog=catalog,
+        requirements=(),
+        weapon_kind=WeaponKind.BOW,
+    )
+    direct_result = search_build_candidates_by_skill_requirements(
+        equipment=catalog.equipment,
+        decorations=catalog.decorations,
+        requirements=(),
+        weapon_kind=WeaponKind.BOW,
+        skill_definitions=catalog.skills,
+        appraisal_charm_skill_groups=catalog.appraisal_charm_skill_groups,
+        appraisal_charm_patterns=catalog.appraisal_charm_patterns,
+    )
+
+    assert catalog_result == direct_result
+
+
+def test_catalog_subclass_preserves_weapon_kind_filtering() -> None:
+    result = catalog_search(
+        catalog=weapon_kind_catalog(catalog_type=CatalogSubclass),
+        requirements=(),
+        weapon_kind=WeaponKind.BOW,
+    )
+
+    assert len(result) == 2
+    assert all(
+        selected_weapon(candidate).weapon_kind is WeaponKind.BOW for candidate in result
+    )
+
+
+def test_weapon_kind_filter_preserves_artian_and_appraisal_generation() -> None:
+    result = catalog_search(
+        catalog=weapon_kind_artian_appraisal_catalog(),
+        requirements=(),
+        weapon_kind=WeaponKind.GREAT_SWORD,
+    )
+
+    assert len(result) == 2
+    assert all(
+        selected_weapon(candidate).equipment_id == "equipment:great-sword-artian"
+        and selected_weapon(candidate).weapon_kind is WeaponKind.GREAT_SWORD
+        and selected_weapon(candidate).series_skill_id == "skill:series-bonus"
+        and selected_weapon(candidate).group_skill_id == "skill:group-bonus"
+        and selected_weapon(candidate).allows_series_skill_assignment is False
+        and selected_weapon(candidate).allows_group_skill_assignment is False
+        for candidate in result
+    )
+    assert selected_charm(result[0]).equipment_id == "equipment:charm"
+    assert selected_charm(result[1]).equipment_id.startswith(
+        "generated:appraisal-charm:"
+    )
+
+
 def test_returns_tuple_with_build_candidate_elements() -> None:
     result = catalog_search(catalog=tiny_catalog(), requirements=())
 
@@ -336,6 +544,8 @@ def test_search_requires_keyword_arguments() -> None:
 
     assert signature.parameters["catalog"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["requirements"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["weapon_kind"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["weapon_kind"].default is None
 
     with pytest.raises(TypeError):
         search_catalog_build_candidates_by_skill_requirements(tiny_catalog(), ())  # type: ignore[call-arg]
@@ -419,6 +629,15 @@ def test_rejects_non_catalog_values(catalog: object) -> None:
         search_catalog_build_candidates_by_skill_requirements(
             catalog=catalog,  # type: ignore[arg-type]
             requirements=(),
+        )
+
+
+def test_propagates_invalid_weapon_kind_type_error() -> None:
+    with pytest.raises(TypeError, match="weapon_kind"):
+        search_catalog_build_candidates_by_skill_requirements(
+            catalog=weapon_kind_catalog(),
+            requirements=(),
+            weapon_kind="bow",  # type: ignore[arg-type]
         )
 
 

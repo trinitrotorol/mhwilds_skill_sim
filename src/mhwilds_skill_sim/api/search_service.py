@@ -25,5 +25,6 @@ def search_catalog_build_candidates_from_payload(
         catalog=catalog,
         requirements=request.requirements,
         max_results=request.max_results,
+        weapon_kind=request.weapon_kind,
     )
     return build_candidate_search_result_to_response(result=result)

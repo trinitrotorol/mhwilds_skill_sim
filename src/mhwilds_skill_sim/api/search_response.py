@@ -17,7 +17,13 @@ def build_candidate_to_response(
         "equipment": [
             {
                 "equipment_id": equipment.equipment_id,
+                "display_name": equipment.display_name,
                 "part": equipment.part.value,
+                "weapon_kind": (
+                    equipment.weapon_kind.value
+                    if equipment.weapon_kind is not None
+                    else None
+                ),
                 "series_skill_id": equipment.series_skill_id,
                 "group_skill_id": equipment.group_skill_id,
                 "skills": [

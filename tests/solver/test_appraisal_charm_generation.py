@@ -771,6 +771,7 @@ def test_solver_package_exports_generator_in_required_order() -> None:
         "enumerate_decoration_placement_combinations",
         "enumerate_equipment_selections",
         "expand_equipment_bonus_skill_variants",
+        "filter_equipment_candidates_by_weapon_kind",
         "filter_build_candidates_by_skill_requirements",
         "generate_appraisal_charm_equipment_candidates",
         "search_catalog_build_candidates_by_skill_requirements",

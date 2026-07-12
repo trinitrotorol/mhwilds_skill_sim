@@ -10,7 +10,11 @@ from mhwilds_skill_sim.domain.appraisal import (
     AppraisalCharmSkillGroupDefinition,
 )
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
-from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
+from mhwilds_skill_sim.domain.equipment import (
+    EquipmentDefinition,
+    EquipmentPart,
+    WeaponKind,
+)
 from mhwilds_skill_sim.domain.skill import (
     SkillContribution,
     SkillDefinition,
@@ -62,6 +66,7 @@ def equipment_definition(
     group_skill_id: str | None = None,
     allows_series_skill_assignment: bool = False,
     allows_group_skill_assignment: bool = False,
+    weapon_kind: WeaponKind | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id or f"equipment:{part.value}",
@@ -72,6 +77,7 @@ def equipment_definition(
         group_skill_id=group_skill_id,
         allows_series_skill_assignment=allows_series_skill_assignment,
         allows_group_skill_assignment=allows_group_skill_assignment,
+        weapon_kind=weapon_kind,
     )
 
 
@@ -94,6 +100,7 @@ def complete_equipment(
     group_skill_id: str = "skill:group-bonus",
     weapon_allows_series_skill_assignment: bool = False,
     weapon_allows_group_skill_assignment: bool = False,
+    weapon_kind: WeaponKind | None = None,
 ) -> tuple[EquipmentDefinition, ...]:
     equipment_ids = {
         EquipmentPart.WEAPON: weapon_id,
@@ -131,6 +138,7 @@ def complete_equipment(
                 if part is EquipmentPart.WEAPON
                 else False
             ),
+            weapon_kind=weapon_kind if part is EquipmentPart.WEAPON else None,
         )
         for part in REQUIRED_PARTS
     )
@@ -249,6 +257,26 @@ def two_head_equipment(
     )
 
 
+def weapon_kind_equipment(
+    *weapons: tuple[str, WeaponKind | None],
+) -> tuple[EquipmentDefinition, ...]:
+    return (
+        *(
+            equipment_definition(
+                EquipmentPart.WEAPON,
+                equipment_id,
+                weapon_kind=weapon_kind,
+            )
+            for equipment_id, weapon_kind in weapons
+        ),
+        *(
+            equipment_definition(part, f"equipment:{part.value}")
+            for part in REQUIRED_PARTS
+            if part is not EquipmentPart.WEAPON
+        ),
+    )
+
+
 def decoration_definition(
     decoration_id: str = "decoration:weapon-1",
     *,
@@ -286,6 +314,7 @@ def search_candidates(
     equipment: tuple[EquipmentDefinition, ...],
     decorations: tuple[DecorationDefinition, ...],
     requirements: tuple[SkillRequirement, ...],
+    weapon_kind: WeaponKind | None = None,
     skill_definitions: tuple[SkillDefinition, ...] = (),
     appraisal_charm_skill_groups: tuple[AppraisalCharmSkillGroupDefinition, ...] = (),
     appraisal_charm_patterns: tuple[AppraisalCharmPatternDefinition, ...] = (),
@@ -294,6 +323,7 @@ def search_candidates(
         equipment=equipment,
         decorations=decorations,
         requirements=requirements,
+        weapon_kind=weapon_kind,
         skill_definitions=skill_definitions,
         appraisal_charm_skill_groups=appraisal_charm_skill_groups,
         appraisal_charm_patterns=appraisal_charm_patterns,
@@ -318,6 +348,14 @@ def candidate_equipment_ids(
     return tuple(
         tuple(definition.equipment_id for definition in build.equipment)
         for build in candidates
+    )
+
+
+def selected_weapon(candidate: BuildCandidate) -> EquipmentDefinition:
+    return next(
+        equipment
+        for equipment in candidate.equipment
+        if equipment.part is EquipmentPart.WEAPON
     )
 
 
@@ -654,6 +692,176 @@ def test_result_order_is_unchanged_when_skill_definitions_are_supplied() -> None
     assert with_definitions == legacy
 
 
+def test_omitted_weapon_kind_keeps_all_weapon_candidates() -> None:
+    equipment = weapon_kind_equipment(
+        ("equipment:bow", WeaponKind.BOW),
+        ("equipment:great-sword", WeaponKind.GREAT_SWORD),
+        ("equipment:legacy", None),
+    )
+
+    omitted = search_candidates(
+        equipment=equipment,
+        decorations=(),
+        requirements=(),
+    )
+    explicit_none = search_candidates(
+        equipment=equipment,
+        decorations=(),
+        requirements=(),
+        weapon_kind=None,
+    )
+
+    assert omitted == explicit_none
+    assert tuple(selected_weapon(candidate).weapon_kind for candidate in omitted) == (
+        WeaponKind.BOW,
+        WeaponKind.GREAT_SWORD,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("weapon_kind", "expected_weapon_id"),
+    [
+        (WeaponKind.GREAT_SWORD, "equipment:great-sword"),
+        (WeaponKind.BOW, "equipment:bow"),
+    ],
+)
+def test_weapon_kind_selects_only_matching_weapon_builds(
+    weapon_kind: WeaponKind,
+    expected_weapon_id: str,
+) -> None:
+    result = search_candidates(
+        equipment=weapon_kind_equipment(
+            ("equipment:great-sword", WeaponKind.GREAT_SWORD),
+            ("equipment:bow", WeaponKind.BOW),
+        ),
+        decorations=(),
+        requirements=(),
+        weapon_kind=weapon_kind,
+    )
+
+    assert tuple(selected_weapon(candidate).equipment_id for candidate in result) == (
+        expected_weapon_id,
+    )
+    assert all(
+        selected_weapon(candidate).weapon_kind is weapon_kind for candidate in result
+    )
+
+
+def test_selected_weapon_kind_excludes_unknown_kind_legacy_weapon() -> None:
+    result = search_candidates(
+        equipment=weapon_kind_equipment(
+            ("equipment:legacy", None),
+            ("equipment:great-sword", WeaponKind.GREAT_SWORD),
+        ),
+        decorations=(),
+        requirements=(),
+        weapon_kind=WeaponKind.GREAT_SWORD,
+    )
+
+    assert tuple(selected_weapon(candidate).equipment_id for candidate in result) == (
+        "equipment:great-sword",
+    )
+
+
+def test_selected_weapon_kind_without_matching_weapon_returns_no_candidate() -> None:
+    result = search_candidates(
+        equipment=weapon_kind_equipment(
+            ("equipment:bow", WeaponKind.BOW),
+            ("equipment:legacy", None),
+        ),
+        decorations=(),
+        requirements=(),
+        weapon_kind=WeaponKind.HAMMER,
+    )
+
+    assert result == ()
+
+
+def test_weapon_kind_filter_preserves_retained_candidate_order() -> None:
+    result = search_candidates(
+        equipment=weapon_kind_equipment(
+            ("equipment:great-sword-a", WeaponKind.GREAT_SWORD),
+            ("equipment:bow", WeaponKind.BOW),
+            ("equipment:great-sword-b", WeaponKind.GREAT_SWORD),
+        ),
+        decorations=(),
+        requirements=(),
+        weapon_kind=WeaponKind.GREAT_SWORD,
+    )
+
+    assert tuple(selected_weapon(candidate).equipment_id for candidate in result) == (
+        "equipment:great-sword-a",
+        "equipment:great-sword-b",
+    )
+
+
+def test_artian_expansion_only_uses_selected_weapon_kind_templates() -> None:
+    non_weapon_equipment = weapon_kind_equipment()
+    equipment = (
+        equipment_definition(
+            EquipmentPart.WEAPON,
+            "equipment:great-sword-artian",
+            allows_series_skill_assignment=True,
+            allows_group_skill_assignment=True,
+            weapon_kind=WeaponKind.GREAT_SWORD,
+        ),
+        equipment_definition(
+            EquipmentPart.WEAPON,
+            "equipment:bow-artian",
+            allows_series_skill_assignment=True,
+            allows_group_skill_assignment=True,
+            weapon_kind=WeaponKind.BOW,
+        ),
+        *non_weapon_equipment,
+    )
+
+    selected = search_candidates(
+        equipment=equipment,
+        decorations=(),
+        requirements=(),
+        weapon_kind=WeaponKind.GREAT_SWORD,
+        skill_definitions=artian_skill_definitions(),
+    )
+    unfiltered = search_candidates(
+        equipment=equipment,
+        decorations=(),
+        requirements=(),
+        skill_definitions=artian_skill_definitions(),
+    )
+
+    assert len(selected) == 4
+    assert len(unfiltered) == 8
+    assert all(
+        selected_weapon(candidate).equipment_id == "equipment:great-sword-artian"
+        and selected_weapon(candidate).weapon_kind is WeaponKind.GREAT_SWORD
+        and selected_weapon(candidate).allows_series_skill_assignment is False
+        and selected_weapon(candidate).allows_group_skill_assignment is False
+        for candidate in selected
+    )
+
+
+def test_appraisal_charm_generation_is_unaffected_by_weapon_kind_filtering() -> None:
+    result = search_candidates(
+        equipment=weapon_kind_equipment(
+            ("equipment:great-sword", WeaponKind.GREAT_SWORD),
+            ("equipment:bow", WeaponKind.BOW),
+        ),
+        decorations=(),
+        requirements=(requirement("skill:attack-boost", 2),),
+        weapon_kind=WeaponKind.BOW,
+        skill_definitions=(normal_skill_definition(maximum_level=2),),
+        appraisal_charm_skill_groups=(
+            appraisal_skill_group(skills=(skill("skill:attack-boost", 2),)),
+        ),
+        appraisal_charm_patterns=(appraisal_pattern(),),
+    )
+
+    assert len(result) == 1
+    assert selected_weapon(result[0]).weapon_kind is WeaponKind.BOW
+    assert result[0].equipment[-1].equipment_id.startswith("generated:appraisal-charm:")
+
+
 def test_returns_tuple_with_build_candidate_elements() -> None:
     result = search_candidates(
         equipment=complete_equipment(),
@@ -671,6 +879,8 @@ def test_search_requires_keyword_arguments() -> None:
     assert signature.parameters["equipment"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["decorations"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["requirements"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["weapon_kind"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["weapon_kind"].default is None
     assert (
         signature.parameters["skill_definitions"].kind is inspect.Parameter.KEYWORD_ONLY
     )
@@ -797,6 +1007,31 @@ def test_propagates_equipment_type_errors(equipment: object) -> None:
             equipment=equipment,  # type: ignore[arg-type]
             decorations=(),
             requirements=(),
+        )
+
+
+def test_propagates_invalid_weapon_kind_type_error() -> None:
+    with pytest.raises(TypeError, match="weapon_kind"):
+        search_build_candidates_by_skill_requirements(
+            equipment=complete_equipment(),
+            decorations=(),
+            requirements=(),
+            weapon_kind="great-sword",  # type: ignore[arg-type]
+        )
+
+
+def test_duplicate_equipment_ids_are_rejected_before_weapon_kind_filtering() -> None:
+    equipment = weapon_kind_equipment(
+        ("equipment:duplicate", WeaponKind.GREAT_SWORD),
+        ("equipment:duplicate", WeaponKind.BOW),
+    )
+
+    with pytest.raises(ValueError, match="equipment"):
+        search_build_candidates_by_skill_requirements(
+            equipment=equipment,
+            decorations=(),
+            requirements=(),
+            weapon_kind=WeaponKind.GREAT_SWORD,
         )
 
 

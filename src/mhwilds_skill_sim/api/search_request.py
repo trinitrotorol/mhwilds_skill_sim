@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mhwilds_skill_sim.domain.equipment import WeaponKind
 from mhwilds_skill_sim.solver.requirements import SkillRequirement
 
 
@@ -11,10 +12,12 @@ from mhwilds_skill_sim.solver.requirements import SkillRequirement
 class SearchRequest:
     requirements: tuple[SkillRequirement, ...]
     max_results: int
+    weapon_kind: WeaponKind | None = None
 
     def __post_init__(self) -> None:
         _validate_requirements(value=self.requirements)
         _validate_max_results(value=self.max_results)
+        _validate_weapon_kind(value=self.weapon_kind)
 
 
 def decode_search_request_payload(
@@ -31,6 +34,7 @@ def decode_search_request_payload(
     return SearchRequest(
         requirements=requirements,
         max_results=payload["max_results"],
+        weapon_kind=_decode_weapon_kind_payload(value=payload.get("weapon_kind")),
     )
 
 
@@ -57,6 +61,11 @@ def _validate_max_results(*, value: object) -> None:
         raise ValueError("max_results must be at least 0")
 
 
+def _validate_weapon_kind(*, value: object) -> None:
+    if value is not None and not isinstance(value, WeaponKind):
+        raise TypeError("weapon_kind must be WeaponKind or None")
+
+
 def _validate_payload_shape(*, payload: object) -> None:
     if type(payload) is not dict:
         raise TypeError("payload must be object")
@@ -64,11 +73,25 @@ def _validate_payload_shape(*, payload: object) -> None:
     _validate_exact_keys(
         value=payload,
         required_keys=("requirements", "max_results"),
+        optional_keys=("weapon_kind",),
         location="payload",
     )
 
     if type(payload["requirements"]) is not list:
         raise TypeError("requirements must be list")
+
+
+def _decode_weapon_kind_payload(*, value: object) -> WeaponKind | None:
+    if value is None:
+        return None
+
+    if type(value) is not str:
+        raise TypeError("weapon_kind must be str or null")
+
+    try:
+        return WeaponKind(value)
+    except ValueError as error:
+        raise ValueError("weapon_kind must be a valid weapon kind") from error
 
 
 def _decode_requirement_payload(
@@ -83,6 +106,7 @@ def _decode_requirement_payload(
     _validate_exact_keys(
         value=value,
         required_keys=("skill_id", "min_level"),
+        optional_keys=(),
         location=location,
     )
 
@@ -96,14 +120,16 @@ def _validate_exact_keys(
     *,
     value: dict[object, object],
     required_keys: tuple[str, ...],
+    optional_keys: tuple[str, ...],
     location: str,
 ) -> None:
     keys = set(value)
     required_key_set = set(required_keys)
+    allowed_key_set = required_key_set | set(optional_keys)
     missing_keys = tuple(key for key in required_keys if key not in keys)
     extra_keys = tuple(
         sorted(
-            (key for key in keys if key not in required_key_set),
+            (key for key in keys if key not in allowed_key_set),
             key=_key_sort_value,
         ),
     )

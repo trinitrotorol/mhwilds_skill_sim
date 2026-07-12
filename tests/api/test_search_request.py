@@ -11,6 +11,7 @@ from mhwilds_skill_sim.api.search_request import (
     SearchRequest,
     decode_search_request_payload,
 )
+from mhwilds_skill_sim.domain.equipment import WeaponKind
 from mhwilds_skill_sim.solver.requirements import SkillRequirement
 
 
@@ -67,6 +68,17 @@ def test_search_request_keeps_valid_values() -> None:
 
     assert request.requirements == requirements
     assert request.max_results == 20
+    assert request.weapon_kind is None
+
+
+def test_search_request_accepts_weapon_kind() -> None:
+    request = SearchRequest(
+        requirements=(),
+        max_results=20,
+        weapon_kind=WeaponKind.GREAT_SWORD,
+    )
+
+    assert request.weapon_kind is WeaponKind.GREAT_SWORD
 
 
 def test_search_request_accepts_empty_requirements_and_zero_max_results() -> None:
@@ -77,10 +89,22 @@ def test_search_request_accepts_empty_requirements_and_zero_max_results() -> Non
 
 
 def test_search_request_value_semantics_and_hashing() -> None:
-    request = SearchRequest(requirements=(requirement(),), max_results=1)
+    request = SearchRequest(
+        requirements=(requirement(),),
+        max_results=1,
+        weapon_kind=WeaponKind.BOW,
+    )
 
-    assert request == SearchRequest(requirements=(requirement(),), max_results=1)
-    assert request != SearchRequest(requirements=(), max_results=1)
+    assert request == SearchRequest(
+        requirements=(requirement(),),
+        max_results=1,
+        weapon_kind=WeaponKind.BOW,
+    )
+    assert request != SearchRequest(
+        requirements=(requirement(),),
+        max_results=1,
+        weapon_kind=WeaponKind.GREAT_SWORD,
+    )
     assert {request, request} == {request}
 
 
@@ -146,6 +170,16 @@ def test_search_request_rejects_negative_max_results() -> None:
         SearchRequest(requirements=(), max_results=-1)
 
 
+@pytest.mark.parametrize("weapon_kind", ["bow", True, 1, object()])
+def test_search_request_rejects_invalid_weapon_kind(weapon_kind: object) -> None:
+    with pytest.raises(TypeError, match="weapon_kind"):
+        SearchRequest(
+            requirements=(),
+            max_results=1,
+            weapon_kind=weapon_kind,  # type: ignore[arg-type]
+        )
+
+
 def test_search_request_public_import() -> None:
     from mhwilds_skill_sim.api import SearchRequest as ExportedSearchRequest
 
@@ -159,6 +193,33 @@ def test_decode_search_request_payload_converts_valid_payload() -> None:
         requirements=(requirement("skill:attack-boost", 3),),
         max_results=20,
     )
+
+
+def test_decode_search_request_payload_accepts_explicit_null_weapon_kind() -> None:
+    request = decode_search_request_payload(
+        payload={
+            "requirements": [],
+            "max_results": 20,
+            "weapon_kind": None,
+        },
+    )
+
+    assert request.weapon_kind is None
+
+
+@pytest.mark.parametrize("weapon_kind", tuple(WeaponKind))
+def test_decode_search_request_payload_accepts_every_weapon_kind(
+    weapon_kind: WeaponKind,
+) -> None:
+    request = decode_search_request_payload(
+        payload={
+            "requirements": [],
+            "max_results": 20,
+            "weapon_kind": weapon_kind.value,
+        },
+    )
+
+    assert request.weapon_kind is weapon_kind
 
 
 def test_decode_search_request_payload_accepts_empty_requirements() -> None:
@@ -215,6 +276,7 @@ def test_decode_search_request_payload_preserves_max_results_zero_and_large_valu
 def test_decode_search_request_payload_accepts_root_key_order_variations() -> None:
     request = decode_search_request_payload(
         payload={
+            "weapon_kind": "great-sword",
             "max_results": 5,
             "requirements": [
                 {"min_level": 3, "skill_id": "Skill:Internal_ID-01"},
@@ -225,6 +287,7 @@ def test_decode_search_request_payload_accepts_root_key_order_variations() -> No
     assert request == SearchRequest(
         requirements=(requirement("Skill:Internal_ID-01", 3),),
         max_results=5,
+        weapon_kind=WeaponKind.GREAT_SWORD,
     )
 
 
@@ -242,10 +305,11 @@ def test_decode_search_request_payload_preserves_skill_id_text() -> None:
 
 
 def test_decode_search_request_payload_does_not_mutate_input() -> None:
-    payload = valid_payload()
+    payload = {**valid_payload(), "weapon_kind": "bow"}
     original_payload = {
         "requirements": [dict(payload["requirements"][0])],  # type: ignore[index]
         "max_results": payload["max_results"],
+        "weapon_kind": payload["weapon_kind"],
     }
 
     decode_search_request_payload(payload=payload)
@@ -523,6 +587,45 @@ def test_decode_search_request_payload_rejects_negative_max_results() -> None:
             payload={
                 "requirements": [],
                 "max_results": -1,
+            },
+        )
+
+
+@pytest.mark.parametrize("weapon_kind", [True, 1, 1.5, [], {}, ()])
+def test_decode_search_request_payload_rejects_invalid_weapon_kind_type(
+    weapon_kind: object,
+) -> None:
+    with pytest.raises(TypeError, match="weapon_kind"):
+        decode_search_request_payload(
+            payload={
+                "requirements": [],
+                "max_results": 1,
+                "weapon_kind": weapon_kind,
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    "weapon_kind",
+    [
+        "great_sword",
+        "Great-Sword",
+        "GREAT-SWORD",
+        " great-sword",
+        "great-sword ",
+        "",
+        "unknown",
+    ],
+)
+def test_decode_search_request_payload_rejects_invalid_weapon_kind_string(
+    weapon_kind: str,
+) -> None:
+    with pytest.raises(ValueError, match="weapon_kind"):
+        decode_search_request_payload(
+            payload={
+                "requirements": [],
+                "max_results": 1,
+                "weapon_kind": weapon_kind,
             },
         )
 

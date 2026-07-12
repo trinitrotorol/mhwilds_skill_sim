@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mhwilds_skill_sim.catalog.model import Catalog
+from mhwilds_skill_sim.domain.equipment import WeaponKind
 from mhwilds_skill_sim.solver.build import BuildCandidate
 from mhwilds_skill_sim.solver.requirements import SkillRequirement
 from mhwilds_skill_sim.solver.search import (
@@ -14,6 +15,7 @@ def search_catalog_build_candidates_by_skill_requirements(
     *,
     catalog: Catalog,
     requirements: tuple[SkillRequirement, ...],
+    weapon_kind: WeaponKind | None = None,
 ) -> tuple[BuildCandidate, ...]:
     if not isinstance(catalog, Catalog):
         raise TypeError("catalog must be Catalog")
@@ -22,6 +24,7 @@ def search_catalog_build_candidates_by_skill_requirements(
         equipment=catalog.equipment,
         decorations=catalog.decorations,
         requirements=requirements,
+        weapon_kind=weapon_kind,
         skill_definitions=catalog.skills,
         appraisal_charm_skill_groups=catalog.appraisal_charm_skill_groups,
         appraisal_charm_patterns=catalog.appraisal_charm_patterns,
