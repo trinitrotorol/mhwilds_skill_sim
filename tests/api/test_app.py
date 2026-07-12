@@ -83,10 +83,15 @@ def test_project_dependencies_include_fastapi_runtime_dependency() -> None:
     assert "fastapi>=0.115,<1" in dependencies
 
 
-def test_project_dependencies_do_not_add_server_or_client_dependencies() -> None:
+def test_project_dependencies_include_uvicorn_runtime_dependency() -> None:
+    dependencies = project_dependencies()
+
+    assert "uvicorn>=0.51,<1" in dependencies
+
+
+def test_project_dependencies_do_not_add_client_or_model_dependencies() -> None:
     names = dependency_names(project_dependencies())
 
-    assert "uvicorn" not in names
     assert "httpx" not in names
     assert "pydantic" not in names
 
@@ -111,10 +116,53 @@ def test_module_level_app_is_fastapi_instance() -> None:
     assert app.title == "mhwilds-skill-sim"
 
 
-def test_create_app_requires_no_arguments() -> None:
+def test_create_app_has_exact_catalog_keyword_only_signature() -> None:
     signature = inspect.signature(create_app)
+    parameters = signature.parameters
 
-    assert signature.parameters == {}
+    assert list(parameters) == ["catalog"]
+    assert parameters["catalog"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameters["catalog"].default is None
+    assert isinstance(create_app(), FastAPI)
+
+
+def test_create_app_rejects_positional_catalog() -> None:
+    with pytest.raises(TypeError):
+        create_app(tiny_catalog())  # type: ignore[call-arg]
+
+
+def test_create_app_stores_exact_injected_catalog() -> None:
+    catalog = tiny_catalog()
+
+    application = create_app(catalog=catalog)
+
+    assert application.state.catalog is catalog
+
+
+def test_create_app_accepts_catalog_subclass() -> None:
+    class CatalogSubclass(Catalog):
+        pass
+
+    catalog = CatalogSubclass(schema_version=1, equipment=(), decorations=())
+
+    application = create_app(catalog=catalog)
+
+    assert application.state.catalog is catalog
+
+
+@pytest.mark.parametrize(
+    "invalid_catalog",
+    [object(), "catalog", 0, True, SimpleNamespace()],
+)
+def test_create_app_rejects_invalid_catalog_values(invalid_catalog: object) -> None:
+    with pytest.raises(TypeError, match="catalog"):
+        create_app(catalog=invalid_catalog)  # type: ignore[arg-type]
+
+
+def test_create_app_without_catalog_does_not_create_catalog_state() -> None:
+    application = create_app()
+
+    assert not hasattr(application.state, "catalog")
 
 
 def test_app_module_exports_create_app_and_app() -> None:
@@ -201,6 +249,25 @@ def test_search_endpoint_returns_serializable_response_from_state_catalog() -> N
     assert payload == original_payload
 
 
+def test_search_endpoint_uses_injected_catalog() -> None:
+    catalog = tiny_catalog()
+    payload = valid_search_payload()
+    application = create_app(catalog=catalog)
+    route = route_for_path(application, "/search")
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+        payload=payload,
+    )
+
+    assert application.state.catalog is catalog
+    assert response == search_catalog_build_candidates_from_payload(
+        catalog=catalog,
+        payload=payload,
+    )
+
+
 def test_search_endpoint_raises_503_when_catalog_is_missing() -> None:
     application = create_app()
     route = route_for_path(application, "/search")
@@ -276,6 +343,37 @@ def test_create_app_state_is_isolated_between_instances() -> None:
     assert not hasattr(second.state, "catalog")
 
 
+def test_injected_and_non_injected_app_state_is_independent() -> None:
+    catalog = tiny_catalog()
+    injected = create_app(catalog=catalog)
+    non_injected = create_app()
+
+    assert injected.state.catalog is catalog
+    assert not hasattr(non_injected.state, "catalog")
+
+
+def test_two_injected_apps_retain_their_respective_catalogs() -> None:
+    first_catalog = tiny_catalog()
+    second_catalog = Catalog(schema_version=1, equipment=(), decorations=())
+
+    first = create_app(catalog=first_catalog)
+    second = create_app(catalog=second_catalog)
+
+    assert first_catalog is not second_catalog
+    assert first.state.catalog is first_catalog
+    assert second.state.catalog is second_catalog
+
+
+def test_injected_catalog_does_not_change_health_or_openapi_behavior() -> None:
+    application = create_app(catalog=tiny_catalog())
+    health_route = route_for_path(application, "/health")
+    schema = application.openapi()
+
+    assert call_route_endpoint(health_route) == {"status": "ok"}
+    assert "get" in schema["paths"]["/health"]
+    assert "post" in schema["paths"]["/search"]
+
+
 def test_module_level_app_has_no_catalog_configured() -> None:
     assert not hasattr(app.state, "catalog")
 
@@ -295,6 +393,7 @@ def test_app_source_stays_minimal() -> None:
     lowered_source = source.lower()
 
     assert "load_catalog" not in source
+    assert "uvicorn" not in lowered_source
     assert "os.environ" not in source
     assert "basemodel" not in lowered_source
     assert "pydantic" not in lowered_source
@@ -302,5 +401,6 @@ def test_app_source_stays_minimal() -> None:
     assert "Depends" not in source
     assert "CORSMiddleware" not in source
     assert "StaticFiles" not in source
+    assert "middleware" not in lowered_source
     assert "React" not in source
     assert "TestClient" not in source

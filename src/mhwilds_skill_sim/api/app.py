@@ -10,8 +10,16 @@ from mhwilds_skill_sim.api.search_service import (
 from mhwilds_skill_sim.catalog.model import Catalog
 
 
-def create_app() -> FastAPI:
+def create_app(
+    *,
+    catalog: Catalog | None = None,
+) -> FastAPI:
+    if catalog is not None and not isinstance(catalog, Catalog):
+        raise TypeError("catalog must be Catalog or None")
+
     api_app = FastAPI(title="mhwilds-skill-sim")
+    if catalog is not None:
+        api_app.state.catalog = catalog
 
     @api_app.get("/health")
     def health() -> dict[str, str]:
