@@ -12,6 +12,7 @@ from mhwilds_skill_sim.domain import (
     EquipmentDefinition,
     EquipmentPart,
     SkillContribution,
+    WeaponKind,
     can_place_decoration,
 )
 
@@ -34,6 +35,57 @@ EXPECTED_EQUIPMENT_PART_VALUES = [
     "waist",
     "legs",
     "charm",
+]
+
+EXPECTED_WEAPON_KINDS = [
+    WeaponKind.BOW,
+    WeaponKind.CHARGE_BLADE,
+    WeaponKind.DUAL_BLADES,
+    WeaponKind.GREAT_SWORD,
+    WeaponKind.GUNLANCE,
+    WeaponKind.HAMMER,
+    WeaponKind.HEAVY_BOWGUN,
+    WeaponKind.HUNTING_HORN,
+    WeaponKind.INSECT_GLAIVE,
+    WeaponKind.LANCE,
+    WeaponKind.LIGHT_BOWGUN,
+    WeaponKind.LONG_SWORD,
+    WeaponKind.SWITCH_AXE,
+    WeaponKind.SWORD_SHIELD,
+]
+
+EXPECTED_WEAPON_KIND_NAMES = [
+    "BOW",
+    "CHARGE_BLADE",
+    "DUAL_BLADES",
+    "GREAT_SWORD",
+    "GUNLANCE",
+    "HAMMER",
+    "HEAVY_BOWGUN",
+    "HUNTING_HORN",
+    "INSECT_GLAIVE",
+    "LANCE",
+    "LIGHT_BOWGUN",
+    "LONG_SWORD",
+    "SWITCH_AXE",
+    "SWORD_SHIELD",
+]
+
+EXPECTED_WEAPON_KIND_VALUES = [
+    "bow",
+    "charge-blade",
+    "dual-blades",
+    "great-sword",
+    "gunlance",
+    "hammer",
+    "heavy-bowgun",
+    "hunting-horn",
+    "insect-glaive",
+    "lance",
+    "light-bowgun",
+    "long-sword",
+    "switch-axe",
+    "sword-shield",
 ]
 
 
@@ -59,6 +111,7 @@ def equipment(
     allows_series_skill_assignment: bool = False,
     allows_group_skill_assignment: bool = False,
     display_name: str | None = None,
+    weapon_kind: WeaponKind | None = None,
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
@@ -70,6 +123,7 @@ def equipment(
         allows_series_skill_assignment=allows_series_skill_assignment,
         allows_group_skill_assignment=allows_group_skill_assignment,
         display_name=display_name,
+        weapon_kind=weapon_kind,
     )
 
 
@@ -414,6 +468,7 @@ def test_equipment_definitions_with_same_values_are_equal() -> None:
         equipment(group_skill_id="skill:fixture-group-bonus"),
         equipment(allows_series_skill_assignment=True),
         equipment(allows_group_skill_assignment=True),
+        equipment(weapon_kind=WeaponKind.GREAT_SWORD),
     ],
 )
 def test_equipment_definitions_with_different_values_are_not_equal(
@@ -839,3 +894,126 @@ def test_equipment_rejects_display_name_string_subclass() -> None:
 
     with pytest.raises(TypeError, match="display_name"):
         equipment(display_name=DisplayName("Hope Helm"))
+
+
+def test_weapon_kind_declaration_order_matches_public_contract() -> None:
+    assert list(WeaponKind) == EXPECTED_WEAPON_KINDS
+
+
+def test_weapon_kind_member_names_match_public_contract() -> None:
+    assert list(WeaponKind.__members__) == EXPECTED_WEAPON_KIND_NAMES
+
+
+def test_weapon_kind_values_match_public_contract_without_aliases() -> None:
+    values = [kind.value for kind in WeaponKind]
+
+    assert values == EXPECTED_WEAPON_KIND_VALUES
+    assert len(values) == len(set(values))
+    assert len(WeaponKind.__members__) == len(EXPECTED_WEAPON_KIND_VALUES)
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    zip(EXPECTED_WEAPON_KINDS, EXPECTED_WEAPON_KIND_VALUES),
+)
+def test_weapon_kind_string_representation_is_exact(
+    kind: WeaponKind,
+    expected: str,
+) -> None:
+    assert str(kind) == expected
+
+
+@pytest.mark.parametrize("value", ["Great-Sword", "great_sword", "gs", ""])
+def test_weapon_kind_rejects_aliases_case_and_punctuation_variants(
+    value: str,
+) -> None:
+    with pytest.raises(ValueError):
+        WeaponKind(value)
+
+
+def test_equipment_weapon_kind_defaults_to_none() -> None:
+    definition = EquipmentDefinition(
+        "weapon:great-sword:test",
+        EquipmentPart.WEAPON,
+        (),
+        (),
+    )
+
+    assert definition.weapon_kind is None
+
+
+@pytest.mark.parametrize("weapon_kind", EXPECTED_WEAPON_KINDS)
+def test_weapon_equipment_accepts_every_weapon_kind(
+    weapon_kind: WeaponKind,
+) -> None:
+    definition = equipment(weapon_kind=weapon_kind)
+
+    assert definition.part is EquipmentPart.WEAPON
+    assert definition.weapon_kind is weapon_kind
+
+
+def test_weapon_equipment_may_retain_none_weapon_kind() -> None:
+    definition = equipment(weapon_kind=None)
+
+    assert definition.weapon_kind is None
+
+
+@pytest.mark.parametrize("value", ["great-sword", True, 1, object()])
+def test_equipment_rejects_non_weapon_kind_values(value: object) -> None:
+    with pytest.raises(TypeError, match="weapon_kind"):
+        EquipmentDefinition(
+            equipment_id="weapon:great-sword:test",
+            part=EquipmentPart.WEAPON,
+            skills=(),
+            slots=(),
+            weapon_kind=value,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        EquipmentPart.HEAD,
+        EquipmentPart.CHEST,
+        EquipmentPart.ARMS,
+        EquipmentPart.WAIST,
+        EquipmentPart.LEGS,
+        EquipmentPart.CHARM,
+    ],
+)
+def test_non_weapon_equipment_rejects_weapon_kind(part: EquipmentPart) -> None:
+    with pytest.raises(ValueError, match="weapon_kind"):
+        equipment(part=part, weapon_kind=WeaponKind.GREAT_SWORD)
+
+
+def test_equipment_does_not_infer_weapon_kind_from_id() -> None:
+    definition = equipment(equipment_id="mhdb:weapon:bow:4001")
+
+    assert definition.weapon_kind is None
+
+
+def test_equipment_equality_and_hash_include_weapon_kind() -> None:
+    without_kind = equipment()
+    with_kind = equipment(weapon_kind=WeaponKind.GREAT_SWORD)
+    same_kind = equipment(weapon_kind=WeaponKind.GREAT_SWORD)
+
+    assert with_kind == same_kind
+    assert hash(with_kind) == hash(same_kind)
+    assert without_kind != with_kind
+    assert len({without_kind, with_kind}) == 2
+
+
+def test_equipment_weapon_kind_is_frozen() -> None:
+    definition = equipment(weapon_kind=WeaponKind.GREAT_SWORD)
+
+    with pytest.raises(FrozenInstanceError):
+        definition.weapon_kind = WeaponKind.BOW
+
+
+def test_domain_package_exports_weapon_kind_at_required_position() -> None:
+    import mhwilds_skill_sim.domain as domain_package
+    from mhwilds_skill_sim.domain import WeaponKind as ExportedWeaponKind
+
+    assert ExportedWeaponKind is WeaponKind
+    skill_rank_index = domain_package.__all__.index("SkillRankDefinition")
+    assert domain_package.__all__[skill_rank_index + 1] == "WeaponKind"

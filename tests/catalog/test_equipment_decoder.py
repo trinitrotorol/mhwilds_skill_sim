@@ -14,7 +14,11 @@ from mhwilds_skill_sim.catalog.decoder import (
 )
 from mhwilds_skill_sim.catalog.errors import CatalogDecodeError
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
-from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
+from mhwilds_skill_sim.domain.equipment import (
+    EquipmentDefinition,
+    EquipmentPart,
+    WeaponKind,
+)
 from mhwilds_skill_sim.domain.skill import SkillContribution
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 
@@ -694,6 +698,108 @@ def test_decode_normalized_equipment_rejects_display_name_string_subclass() -> N
 def test_normalized_equipment_with_display_name_still_rejects_unknown_key() -> None:
     value = armor_value()
     value["display_name"] = "テストヘルムα"
+    value["unknown"] = True
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[0]")
+
+    assert exc_info.value.path == "$.equipment[0]"
+    assert "unknown" in exc_info.value.detail
+
+
+def test_decode_equipment_without_weapon_kind_remains_valid() -> None:
+    decoded = decode_equipment_definition(value=weapon_value())
+
+    assert decoded.weapon_kind is None
+
+
+def test_decode_equipment_accepts_explicit_null_weapon_kind() -> None:
+    value = weapon_value()
+    value["weapon_kind"] = None
+
+    decoded = decode_equipment_definition(value=value)
+
+    assert decoded.weapon_kind is None
+
+
+@pytest.mark.parametrize("weapon_kind", list(WeaponKind))
+def test_decode_equipment_converts_every_weapon_kind(
+    weapon_kind: WeaponKind,
+) -> None:
+    value = weapon_value()
+    value["weapon_kind"] = weapon_kind.value
+
+    decoded = decode_equipment_definition(value=value)
+
+    assert decoded.weapon_kind is weapon_kind
+
+
+def test_decode_equipment_weapon_kind_key_order_is_independent() -> None:
+    decoded = decode_equipment_definition(
+        value={
+            "weapon_kind": "great-sword",
+            "allows_group_skill_assignment": True,
+            "group_skill_id": None,
+            "slots": [{"level": 2, "kind": "weapon"}],
+            "skills": [{"level": 1, "skill_id": "mhdb:skill:-1002"}],
+            "part": "weapon",
+            "display_name": "テストアーティア大剣",
+            "allows_series_skill_assignment": True,
+            "series_skill_id": None,
+            "equipment_id": "mhdb:weapon:great-sword:-4002",
+        }
+    )
+
+    assert decoded.weapon_kind is WeaponKind.GREAT_SWORD
+    assert decoded.display_name == "テストアーティア大剣"
+    assert decoded.allows_series_skill_assignment is True
+    assert decoded.allows_group_skill_assignment is True
+
+
+@pytest.mark.parametrize(
+    ("weapon_kind", "expected_cause"),
+    [
+        ("Great-Sword", ValueError),
+        ("great_sword", ValueError),
+        ("gs", ValueError),
+        ("", ValueError),
+        (True, TypeError),
+        (1, TypeError),
+        (1.5, TypeError),
+        ([], TypeError),
+        (WeaponKind.GREAT_SWORD, TypeError),
+    ],
+)
+def test_decode_equipment_rejects_invalid_weapon_kind_at_nested_path(
+    weapon_kind: object,
+    expected_cause: type[Exception],
+) -> None:
+    value = weapon_value()
+    value["weapon_kind"] = weapon_kind
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[0]")
+
+    assert exc_info.value.path == "$.equipment[0].weapon_kind"
+    assert "weapon_kind" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+def test_decode_equipment_rejects_weapon_kind_on_non_weapon_at_root_path() -> None:
+    value = armor_value()
+    value["weapon_kind"] = "great-sword"
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[0]")
+
+    assert exc_info.value.path == "$.equipment[0]"
+    assert "weapon_kind" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_equipment_with_weapon_kind_still_rejects_unknown_key() -> None:
+    value = weapon_value()
+    value["weapon_kind"] = "great-sword"
     value["unknown"] = True
 
     with pytest.raises(CatalogDecodeError) as exc_info:

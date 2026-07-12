@@ -19,6 +19,23 @@ class EquipmentPart(StrEnum):
     CHARM = "charm"
 
 
+class WeaponKind(StrEnum):
+    BOW = "bow"
+    CHARGE_BLADE = "charge-blade"
+    DUAL_BLADES = "dual-blades"
+    GREAT_SWORD = "great-sword"
+    GUNLANCE = "gunlance"
+    HAMMER = "hammer"
+    HEAVY_BOWGUN = "heavy-bowgun"
+    HUNTING_HORN = "hunting-horn"
+    INSECT_GLAIVE = "insect-glaive"
+    LANCE = "lance"
+    LIGHT_BOWGUN = "light-bowgun"
+    LONG_SWORD = "long-sword"
+    SWITCH_AXE = "switch-axe"
+    SWORD_SHIELD = "sword-shield"
+
+
 @dataclass(frozen=True, slots=True)
 class EquipmentDefinition:
     equipment_id: str
@@ -30,6 +47,7 @@ class EquipmentDefinition:
     allows_series_skill_assignment: bool = False
     allows_group_skill_assignment: bool = False
     display_name: str | None = None
+    weapon_kind: WeaponKind | None = None
 
     def __post_init__(self) -> None:
         if type(self.equipment_id) is not str:
@@ -138,3 +156,10 @@ class EquipmentDefinition:
                 raise ValueError(
                     "display_name must not have leading or trailing whitespace"
                 )
+
+        if self.weapon_kind is not None:
+            if not isinstance(self.weapon_kind, WeaponKind):
+                raise TypeError("weapon_kind must be WeaponKind or None")
+
+            if self.part is not EquipmentPart.WEAPON:
+                raise ValueError("weapon_kind requires weapon equipment")

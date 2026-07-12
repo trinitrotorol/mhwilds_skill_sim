@@ -8,7 +8,11 @@ from mhwilds_skill_sim.domain.bonus import (
     calculate_equipment_bonus_skill_contributions,
 )
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
-from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
+from mhwilds_skill_sim.domain.equipment import (
+    EquipmentDefinition,
+    EquipmentPart,
+    WeaponKind,
+)
 from mhwilds_skill_sim.domain.skill import (
     SkillContribution,
     SkillDefinition,
@@ -34,6 +38,7 @@ __all__ = [
     "SkillDefinition",
     "SkillKind",
     "SkillRankDefinition",
+    "WeaponKind",
     "aggregate_skill_levels",
     "calculate_equipment_bonus_skill_contributions",
     "can_place_decoration",

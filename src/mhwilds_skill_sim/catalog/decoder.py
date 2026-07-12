@@ -9,7 +9,11 @@ from mhwilds_skill_sim.domain.appraisal import (
     AppraisalCharmSkillGroupDefinition,
 )
 from mhwilds_skill_sim.domain.decoration import DecorationDefinition
-from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
+from mhwilds_skill_sim.domain.equipment import (
+    EquipmentDefinition,
+    EquipmentPart,
+    WeaponKind,
+)
 from mhwilds_skill_sim.domain.skill import (
     SkillContribution,
     SkillDefinition,
@@ -52,10 +56,12 @@ _EQUIPMENT_DEFINITION_KEYS = frozenset(
         "allows_series_skill_assignment",
         "allows_group_skill_assignment",
         "display_name",
+        "weapon_kind",
     )
 )
 _EQUIPMENT_DEFINITION_KEY_ORDER = ("equipment_id", "part", "skills", "slots")
 _EQUIPMENT_PART_VALUES = ("weapon", "head", "chest", "arms", "waist", "legs", "charm")
+_WEAPON_KIND_VALUES = tuple(kind.value for kind in WeaponKind)
 _CATALOG_KEYS = frozenset(
     (
         "schema_version",
@@ -437,6 +443,14 @@ def decode_equipment_definition(
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=f"{path}.part", detail=str(exc)) from exc
 
+    try:
+        weapon_kind = _decode_weapon_kind(value.get("weapon_kind"))
+    except (TypeError, ValueError) as exc:
+        raise CatalogDecodeError(
+            path=f"{path}.weapon_kind",
+            detail=str(exc),
+        ) from exc
+
     skills = _decode_equipment_skills(value=value["skills"], path=f"{path}.skills")
     slots = _decode_equipment_slots(value=value["slots"], path=f"{path}.slots")
 
@@ -457,6 +471,7 @@ def decode_equipment_definition(
                 False,
             ),
             display_name=value.get("display_name"),
+            weapon_kind=weapon_kind,
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc
@@ -482,6 +497,20 @@ def _decode_equipment_part(value: object) -> EquipmentPart:
         return EquipmentPart.CHARM
 
     raise ValueError("part must be one of: " + ", ".join(_EQUIPMENT_PART_VALUES))
+
+
+def _decode_weapon_kind(value: object) -> WeaponKind | None:
+    if value is None:
+        return None
+    if type(value) is not str:
+        raise TypeError("weapon_kind must be str or None")
+
+    try:
+        return WeaponKind(value)
+    except ValueError as exc:
+        raise ValueError(
+            "weapon_kind must be one of: " + ", ".join(_WEAPON_KIND_VALUES)
+        ) from exc
 
 
 def _decode_equipment_skills(

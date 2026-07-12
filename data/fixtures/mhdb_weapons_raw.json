@@ -1,0 +1,70 @@
+[
+  {
+    "id": 901,
+    "gameId": 4001,
+    "kind": "great-sword",
+    "name": "テスト大剣",
+    "slots": [
+      2,
+      1
+    ],
+    "skills": [
+      {
+        "skill": {
+          "id": 502,
+          "name": "ignored weapon skill stub"
+        },
+        "level": 1,
+        "description": "ignored weapon skill-rank extra"
+      }
+    ],
+    "series": {
+      "id": 10001,
+      "gameId": 5001,
+      "name": "ignored crafting series stub"
+    },
+    "damage": 100,
+    "rarity": 4,
+    "description": "ignored regular great sword"
+  },
+  {
+    "id": 902,
+    "gameId": -4002,
+    "kind": "great-sword",
+    "name": "テストアーティア大剣",
+    "slots": [
+      3,
+      2,
+      1
+    ],
+    "skills": [],
+    "series": null,
+    "damage": 120,
+    "rarity": 8,
+    "specials": [
+      "ignored"
+    ],
+    "crafting": {
+      "ignored": true
+    }
+  },
+  {
+    "id": 903,
+    "gameId": 4001,
+    "kind": "bow",
+    "name": "テスト弓",
+    "slots": [
+      1
+    ],
+    "skills": [],
+    "series": {
+      "id": 10002,
+      "gameId": 5002,
+      "name": "ignored bow crafting series stub"
+    },
+    "coatings": [
+      "ignored-power-coating"
+    ],
+    "damage": 90
+  }
+]

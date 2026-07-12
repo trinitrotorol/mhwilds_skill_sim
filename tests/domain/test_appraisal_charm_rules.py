@@ -438,6 +438,7 @@ def test_domain_package_exports_appraisal_types_first() -> None:
         "SkillDefinition",
         "SkillKind",
         "SkillRankDefinition",
+        "WeaponKind",
         "aggregate_skill_levels",
         "calculate_equipment_bonus_skill_contributions",
         "can_place_decoration",
