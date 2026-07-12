@@ -1,0 +1,81 @@
+[
+  {
+    "id": 1101,
+    "gameId": -5001,
+    "randomized": false,
+    "ranks": [
+      {
+        "id": 1202,
+        "name": "攻撃の護石Ⅱ（テスト）",
+        "level": 2,
+        "skills": [
+          {
+            "skill": {
+              "id": 501,
+              "name": "ignored attack skill stub"
+            },
+            "level": 2,
+            "description": "ignored attack rank 2 skill-rank extra"
+          }
+        ],
+        "description": "ignored attack charm rank 2"
+      },
+      {
+        "id": 1201,
+        "name": "攻撃の護石Ⅰ（テスト）",
+        "level": 1,
+        "skills": [
+          {
+            "skill": {
+              "id": 501,
+              "name": "ignored attack skill stub"
+            },
+            "level": 1,
+            "description": "ignored attack rank 1 skill-rank extra"
+          }
+        ],
+        "description": "ignored attack charm rank 1"
+      }
+    ],
+    "rarity": 4
+  },
+  {
+    "id": 1102,
+    "gameId": 5002,
+    "randomized": false,
+    "ranks": [
+      {
+        "id": 1203,
+        "name": "技術の護石（テスト）",
+        "level": 1,
+        "skills": [
+          {
+            "skill": {
+              "id": 502,
+              "name": "ignored weapon skill stub"
+            },
+            "level": 1,
+            "description": "ignored weapon skill-rank extra"
+          },
+          {
+            "skill": {
+              "id": 501,
+              "name": "ignored armor skill stub"
+            },
+            "level": 1,
+            "description": "ignored armor skill-rank extra"
+          }
+        ],
+        "description": "ignored mixed charm rank"
+      }
+    ],
+    "description": "ignored mixed charm parent"
+  },
+  {
+    "id": 1103,
+    "gameId": 5003,
+    "randomized": true,
+    "ranks": [],
+    "description": "ignored randomized charm parent"
+  }
+]
