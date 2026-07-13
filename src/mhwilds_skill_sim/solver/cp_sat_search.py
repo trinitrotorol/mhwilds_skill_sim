@@ -1,8 +1,10 @@
-"""CP-SAT feasibility search for one complete Catalog build."""
+"""CP-SAT search for complete Catalog builds."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from math import isfinite
+from time import monotonic
 
 from ortools.sat.python import cp_model
 
@@ -39,6 +41,27 @@ _EquipmentVariables = dict[
 ]
 
 
+@dataclass(frozen=True, slots=True)
+class CpSatBuildSearchResult:
+    candidates: tuple[BuildCandidate, ...]
+    exhausted: bool
+    timed_out: bool
+
+    def __post_init__(self) -> None:
+        if type(self.candidates) is not tuple:
+            raise TypeError("candidates must be tuple")
+        for candidate in self.candidates:
+            if not isinstance(candidate, BuildCandidate):
+                raise TypeError("candidates must contain only BuildCandidate")
+
+        if type(self.exhausted) is not bool:
+            raise TypeError("exhausted must be bool")
+        if type(self.timed_out) is not bool:
+            raise TypeError("timed_out must be bool")
+        if self.exhausted and self.timed_out:
+            raise ValueError("exhausted and timed_out must not both be true")
+
+
 def find_catalog_build_candidate_with_cp_sat(
     *,
     catalog: Catalog,
@@ -55,26 +78,10 @@ def find_catalog_build_candidate_with_cp_sat(
         timeout_seconds=timeout_seconds,
     )
 
-    filtered_equipment = filter_equipment_candidates_by_weapon_kind(
-        equipment=catalog.equipment,
+    candidates_by_part = _prepare_candidates_by_part(
+        catalog=catalog,
         weapon_kind=weapon_kind,
     )
-    generated_charms = generate_appraisal_charm_equipment_candidates(
-        skill_groups=catalog.appraisal_charm_skill_groups,
-        patterns=catalog.appraisal_charm_patterns,
-        skill_definitions=catalog.skills,
-    )
-    expanded_equipment = expand_equipment_bonus_skill_variants(
-        equipment=filtered_equipment + generated_charms,
-        skill_definitions=catalog.skills,
-    )
-
-    candidates_by_part = {
-        part: tuple(
-            equipment for equipment in expanded_equipment if equipment.part is part
-        )
-        for part in EquipmentPart
-    }
     if any(not candidates_by_part[part] for part in EquipmentPart):
         return None
 
@@ -94,34 +101,150 @@ def find_catalog_build_candidate_with_cp_sat(
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise RuntimeError(f"unexpected CP-SAT solver status: {status}")
 
-    selected_equipment = _reconstruct_equipment(
+    return _reconstruct_candidate(
         solver=solver,
+        catalog=catalog,
+        requirements=requirements,
         equipment_variables=equipment_variables,
-    )
-    placements = _reconstruct_placements(
-        solver=solver,
-        selected_equipment=selected_equipment,
-        decorations=catalog.decorations,
         decoration_variables=decoration_variables,
     )
-    aggregated = aggregate_valid_build_skill_levels(
-        equipment=selected_equipment,
-        decorations=catalog.decorations,
-        placements=placements,
+
+
+def search_catalog_build_candidates_with_cp_sat(
+    *,
+    catalog: Catalog,
+    requirements: tuple[SkillRequirement, ...],
+    max_results: int,
+    weapon_kind: WeaponKind | None = None,
+    timeout_seconds: float = 10.0,
+) -> CpSatBuildSearchResult:
+    """Find a limited sequence of distinct Catalog equipment selections."""
+
+    _validate_inputs(
+        catalog=catalog,
+        requirements=requirements,
+        weapon_kind=weapon_kind,
+        timeout_seconds=timeout_seconds,
+    )
+    _validate_max_results(value=max_results)
+    deadline = monotonic() + timeout_seconds
+
+    candidates_by_part = _prepare_candidates_by_part(
+        catalog=catalog,
+        weapon_kind=weapon_kind,
+    )
+    if any(not candidates_by_part[part] for part in EquipmentPart):
+        return CpSatBuildSearchResult(
+            candidates=(),
+            exhausted=True,
+            timed_out=False,
+        )
+
+    model, equipment_variables, decoration_variables = _create_model(
+        catalog=catalog,
+        requirements=requirements,
+        candidates_by_part=candidates_by_part,
+    )
+    candidates: list[BuildCandidate] = []
+
+    while True:
+        remaining_seconds = deadline - monotonic()
+        if remaining_seconds <= 0:
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=False,
+                timed_out=True,
+            )
+
+        solver, status = _solve_model(
+            model=model,
+            timeout_seconds=remaining_seconds,
+        )
+
+        if status == cp_model.INFEASIBLE:
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=True,
+                timed_out=False,
+            )
+        if status == cp_model.UNKNOWN:
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=False,
+                timed_out=True,
+            )
+        if status == cp_model.MODEL_INVALID:
+            raise RuntimeError("CP-SAT model is invalid")
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            raise RuntimeError(f"unexpected CP-SAT solver status: {status}")
+
+        if status == cp_model.FEASIBLE:
+            if len(candidates) < max_results:
+                candidates.append(
+                    _reconstruct_limited_candidate(
+                        solver=solver,
+                        catalog=catalog,
+                        requirements=requirements,
+                        equipment_variables=equipment_variables,
+                        decoration_variables=decoration_variables,
+                    )
+                )
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=False,
+                timed_out=True,
+            )
+
+        if len(candidates) >= max_results:
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=False,
+                timed_out=False,
+            )
+
+        candidates.append(
+            _reconstruct_limited_candidate(
+                solver=solver,
+                catalog=catalog,
+                requirements=requirements,
+                equipment_variables=equipment_variables,
+                decoration_variables=decoration_variables,
+            )
+        )
+        selected_variables = _reconstruct_selected_equipment_variables(
+            solver=solver,
+            equipment_variables=equipment_variables,
+        )
+        model.add(
+            sum(selected_variables, 0) <= len(selected_variables) - 1,
+        )
+
+
+def _prepare_candidates_by_part(
+    *,
+    catalog: Catalog,
+    weapon_kind: WeaponKind | None,
+) -> dict[EquipmentPart, tuple[EquipmentDefinition, ...]]:
+    filtered_equipment = filter_equipment_candidates_by_weapon_kind(
+        equipment=catalog.equipment,
+        weapon_kind=weapon_kind,
+    )
+    generated_charms = generate_appraisal_charm_equipment_candidates(
+        skill_groups=catalog.appraisal_charm_skill_groups,
+        patterns=catalog.appraisal_charm_patterns,
         skill_definitions=catalog.skills,
     )
-    candidate = BuildCandidate(
-        equipment=selected_equipment,
-        placements=placements,
-        skill_levels=tuple(aggregated.items()),
+    expanded_equipment = expand_equipment_bonus_skill_variants(
+        equipment=filtered_equipment + generated_charms,
+        skill_definitions=catalog.skills,
     )
-    if not skill_levels_satisfy_requirements(
-        skill_levels=dict(candidate.skill_levels),
-        requirements=requirements,
-    ):
-        raise RuntimeError("reconstructed CP-SAT build does not satisfy requirements")
 
-    return candidate
+    return {
+        part: tuple(
+            equipment for equipment in expanded_equipment if equipment.part is part
+        )
+        for part in EquipmentPart
+    }
 
 
 def _validate_inputs(
@@ -154,6 +277,13 @@ def _validate_inputs(
         raise ValueError("timeout_seconds must be finite")
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be greater than zero")
+
+
+def _validate_max_results(*, value: object) -> None:
+    if type(value) is not int:
+        raise TypeError("max_results must be int")
+    if value < 0:
+        raise ValueError("max_results must be at least zero")
 
 
 def _create_model(
@@ -367,6 +497,83 @@ def _reconstruct_equipment(
         selected_equipment.append(selected_for_part[0])
 
     return tuple(selected_equipment)
+
+
+def _reconstruct_selected_equipment_variables(
+    *,
+    solver: cp_model.CpSolver,
+    equipment_variables: _EquipmentVariables,
+) -> tuple[cp_model.IntVar, ...]:
+    selected_variables: list[cp_model.IntVar] = []
+    for part in EquipmentPart:
+        selected_for_part = [
+            variable
+            for _, variable in equipment_variables[part]
+            if solver.value(variable) == 1
+        ]
+        if len(selected_for_part) != 1:
+            raise RuntimeError("CP-SAT model did not select exactly one equipment item")
+        selected_variables.append(selected_for_part[0])
+
+    return tuple(selected_variables)
+
+
+def _reconstruct_candidate(
+    *,
+    solver: cp_model.CpSolver,
+    catalog: Catalog,
+    requirements: tuple[SkillRequirement, ...],
+    equipment_variables: _EquipmentVariables,
+    decoration_variables: tuple[cp_model.IntVar, ...],
+) -> BuildCandidate:
+    selected_equipment = _reconstruct_equipment(
+        solver=solver,
+        equipment_variables=equipment_variables,
+    )
+    placements = _reconstruct_placements(
+        solver=solver,
+        selected_equipment=selected_equipment,
+        decorations=catalog.decorations,
+        decoration_variables=decoration_variables,
+    )
+    aggregated = aggregate_valid_build_skill_levels(
+        equipment=selected_equipment,
+        decorations=catalog.decorations,
+        placements=placements,
+        skill_definitions=catalog.skills,
+    )
+    candidate = BuildCandidate(
+        equipment=selected_equipment,
+        placements=placements,
+        skill_levels=tuple(aggregated.items()),
+    )
+    if not skill_levels_satisfy_requirements(
+        skill_levels=dict(candidate.skill_levels),
+        requirements=requirements,
+    ):
+        raise RuntimeError("reconstructed CP-SAT build does not satisfy requirements")
+
+    return candidate
+
+
+def _reconstruct_limited_candidate(
+    *,
+    solver: cp_model.CpSolver,
+    catalog: Catalog,
+    requirements: tuple[SkillRequirement, ...],
+    equipment_variables: _EquipmentVariables,
+    decoration_variables: tuple[cp_model.IntVar, ...],
+) -> BuildCandidate:
+    try:
+        return _reconstruct_candidate(
+            solver=solver,
+            catalog=catalog,
+            requirements=requirements,
+            equipment_variables=equipment_variables,
+            decoration_variables=decoration_variables,
+        )
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("failed to reconstruct a valid CP-SAT build") from error
 
 
 def _reconstruct_placements(
