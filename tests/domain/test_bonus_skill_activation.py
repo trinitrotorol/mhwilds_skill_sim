@@ -23,6 +23,8 @@ def equipment_definition(
     *,
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    additional_series_skill_ids: tuple[str, ...] = (),
+    additional_group_skill_ids: tuple[str, ...] = (),
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
@@ -31,6 +33,8 @@ def equipment_definition(
         slots=(),
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        additional_series_skill_ids=additional_series_skill_ids,
+        additional_group_skill_ids=additional_group_skill_ids,
     )
 
 
@@ -116,6 +120,12 @@ class SkillDefinitionTuple(tuple):
     pass
 
 
+class DuplicateSeriesMembershipEquipment(EquipmentDefinition):
+    @property
+    def series_skill_ids(self) -> tuple[str, ...]:
+        return ("skill:series-bonus", "skill:series-bonus")
+
+
 def calculate(
     *,
     equipment: tuple[EquipmentDefinition, ...] = (),
@@ -186,6 +196,71 @@ def test_group_threshold_activates_group_level() -> None:
         equipment=group_equipment(3),
         skill_definitions=(group_skill_definition(),),
     ) == (SkillContribution("skill:group-bonus", 1),)
+
+
+def test_additional_series_membership_activates_highest_level() -> None:
+    equipment = tuple(
+        equipment_definition(
+            f"equipment:additional-series:{index}",
+            additional_series_skill_ids=("skill:series-bonus",),
+        )
+        for index in range(4)
+    )
+
+    assert calculate(
+        equipment=equipment,
+        skill_definitions=(series_skill_definition(),),
+    ) == (SkillContribution("skill:series-bonus", 2),)
+
+
+def test_additional_group_membership_activates_group_level() -> None:
+    equipment = tuple(
+        equipment_definition(
+            f"equipment:additional-group:{index}",
+            additional_group_skill_ids=("skill:group-bonus",),
+        )
+        for index in range(3)
+    )
+
+    assert calculate(
+        equipment=equipment,
+        skill_definitions=(group_skill_definition(),),
+    ) == (SkillContribution("skill:group-bonus", 1),)
+
+
+def test_primary_and_additional_memberships_share_the_same_piece_count() -> None:
+    equipment = (
+        equipment_definition(
+            "equipment:primary",
+            series_skill_id="skill:series-bonus",
+        ),
+        equipment_definition(
+            "equipment:additional",
+            additional_series_skill_ids=("skill:series-bonus",),
+        ),
+    )
+
+    assert calculate(
+        equipment=equipment,
+        skill_definitions=(series_skill_definition(thresholds=(2,)),),
+    ) == (SkillContribution("skill:series-bonus", 1),)
+
+
+def test_one_equipment_does_not_count_the_same_membership_twice() -> None:
+    equipment = DuplicateSeriesMembershipEquipment(
+        equipment_id="equipment:duplicate-membership",
+        part=EquipmentPart.HEAD,
+        skills=(),
+        slots=(),
+    )
+
+    assert (
+        calculate(
+            equipment=(equipment,),
+            skill_definitions=(series_skill_definition(thresholds=(2,)),),
+        )
+        == ()
+    )
 
 
 def test_simultaneous_series_and_group_activation() -> None:

@@ -807,3 +807,180 @@ def test_equipment_with_weapon_kind_still_rejects_unknown_key() -> None:
 
     assert exc_info.value.path == "$.equipment[0]"
     assert "unknown" in exc_info.value.detail
+
+
+def test_decode_equipment_defaults_additional_memberships_to_empty_tuples() -> None:
+    decoded = decode_equipment_definition(value=armor_value())
+
+    assert decoded.additional_series_skill_ids == ()
+    assert decoded.additional_group_skill_ids == ()
+    assert decoded.series_skill_ids == ()
+    assert decoded.group_skill_ids == ()
+
+
+def test_decode_equipment_preserves_ordered_additional_memberships() -> None:
+    value = armor_value()
+    value["series_skill_id"] = "skill:series-primary"
+    value["group_skill_id"] = "skill:group-primary"
+    value["additional_series_skill_ids"] = [
+        "skill:series-extra-b",
+        "skill:series-extra-a",
+    ]
+    value["additional_group_skill_ids"] = [
+        "skill:group-extra-b",
+        "skill:group-extra-a",
+    ]
+    original = copy.deepcopy(value)
+
+    decoded = decode_equipment_definition(value=value)
+
+    assert decoded.additional_series_skill_ids == (
+        "skill:series-extra-b",
+        "skill:series-extra-a",
+    )
+    assert decoded.additional_group_skill_ids == (
+        "skill:group-extra-b",
+        "skill:group-extra-a",
+    )
+    assert decoded.series_skill_ids == (
+        "skill:series-primary",
+        "skill:series-extra-b",
+        "skill:series-extra-a",
+    )
+    assert decoded.group_skill_ids == (
+        "skill:group-primary",
+        "skill:group-extra-b",
+        "skill:group-extra-a",
+    )
+    assert value == original
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+@pytest.mark.parametrize("invalid_value", [None, (), {}, "skill:bonus"])
+def test_decode_equipment_rejects_non_list_additional_memberships(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    value = armor_value()
+    value[field_name] = invalid_value
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[2]")
+
+    assert exc_info.value.path == f"$.equipment[2].{field_name}"
+    assert field_name in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+def test_decode_equipment_rejects_additional_membership_list_subclasses(
+    field_name: str,
+) -> None:
+    class MembershipList(list[str]):
+        pass
+
+    value = armor_value()
+    value[field_name] = MembershipList(["skill:bonus"])
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[2]")
+
+    assert exc_info.value.path == f"$.equipment[2].{field_name}"
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+@pytest.mark.parametrize(
+    ("invalid_value", "expected_cause"),
+    [
+        (None, TypeError),
+        (True, TypeError),
+        (1, TypeError),
+        ("", ValueError),
+        (" ", ValueError),
+        (" skill:bonus", ValueError),
+        ("skill:bonus ", ValueError),
+    ],
+)
+def test_decode_equipment_rejects_invalid_additional_membership_elements(
+    field_name: str,
+    invalid_value: object,
+    expected_cause: type[Exception],
+) -> None:
+    value = armor_value()
+    value[field_name] = ["skill:valid", invalid_value]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[2]")
+
+    assert exc_info.value.path == f"$.equipment[2].{field_name}[1]"
+    assert field_name in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+def test_decode_equipment_rejects_additional_membership_string_subclasses(
+    field_name: str,
+) -> None:
+    class MembershipId(str):
+        pass
+
+    value = armor_value()
+    value[field_name] = [MembershipId("skill:bonus")]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[2]")
+
+    assert exc_info.value.path == f"$.equipment[2].{field_name}[0]"
+    assert isinstance(exc_info.value.__cause__, TypeError)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+def test_decode_equipment_rejects_duplicate_additional_membership_at_second_path(
+    field_name: str,
+) -> None:
+    value = armor_value()
+    value[field_name] = ["skill:bonus", "skill:bonus"]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[2]")
+
+    assert exc_info.value.path == f"$.equipment[2].{field_name}[1]"
+    assert "duplicate" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("primary_field", "additional_field"),
+    [
+        ("series_skill_id", "additional_series_skill_ids"),
+        ("group_skill_id", "additional_group_skill_ids"),
+    ],
+)
+def test_decode_equipment_rejects_primary_in_additional_memberships(
+    primary_field: str,
+    additional_field: str,
+) -> None:
+    value = armor_value()
+    value[primary_field] = "skill:bonus"
+    value[additional_field] = ["skill:other", "skill:bonus"]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_equipment_definition(value=value, path="$.equipment[2]")
+
+    assert exc_info.value.path == f"$.equipment[2].{additional_field}[1]"
+    assert primary_field in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)

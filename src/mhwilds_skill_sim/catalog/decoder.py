@@ -57,6 +57,8 @@ _EQUIPMENT_DEFINITION_KEYS = frozenset(
         "allows_group_skill_assignment",
         "display_name",
         "weapon_kind",
+        "additional_series_skill_ids",
+        "additional_group_skill_ids",
     )
 )
 _EQUIPMENT_DEFINITION_KEY_ORDER = ("equipment_id", "part", "skills", "slots")
@@ -453,6 +455,31 @@ def decode_equipment_definition(
 
     skills = _decode_equipment_skills(value=value["skills"], path=f"{path}.skills")
     slots = _decode_equipment_slots(value=value["slots"], path=f"{path}.slots")
+    additional_series_skill_ids = _decode_equipment_membership_ids(
+        value=value.get("additional_series_skill_ids", []),
+        path=f"{path}.additional_series_skill_ids",
+        field_name="additional_series_skill_ids",
+    )
+    additional_group_skill_ids = _decode_equipment_membership_ids(
+        value=value.get("additional_group_skill_ids", []),
+        path=f"{path}.additional_group_skill_ids",
+        field_name="additional_group_skill_ids",
+    )
+
+    _reject_primary_membership_in_additional_ids(
+        primary_skill_id=value.get("series_skill_id"),
+        additional_skill_ids=additional_series_skill_ids,
+        path=f"{path}.additional_series_skill_ids",
+        additional_field_name="additional_series_skill_ids",
+        primary_field_name="series_skill_id",
+    )
+    _reject_primary_membership_in_additional_ids(
+        primary_skill_id=value.get("group_skill_id"),
+        additional_skill_ids=additional_group_skill_ids,
+        path=f"{path}.additional_group_skill_ids",
+        additional_field_name="additional_group_skill_ids",
+        primary_field_name="group_skill_id",
+    )
 
     try:
         return EquipmentDefinition(
@@ -472,6 +499,8 @@ def decode_equipment_definition(
             ),
             display_name=value.get("display_name"),
             weapon_kind=weapon_kind,
+            additional_series_skill_ids=additional_series_skill_ids,
+            additional_group_skill_ids=additional_group_skill_ids,
         )
     except (TypeError, ValueError) as exc:
         raise CatalogDecodeError(path=path, detail=str(exc)) from exc
@@ -539,6 +568,75 @@ def _decode_equipment_slots(
         decode_decoration_slot(value=slot, path=f"{path}[{index}]")
         for index, slot in enumerate(value)
     )
+
+
+def _decode_equipment_membership_ids(
+    *,
+    value: object,
+    path: str,
+    field_name: str,
+) -> tuple[str, ...]:
+    if type(value) is not list:
+        raise CatalogDecodeError(path=path, detail=f"{field_name} must be list")
+
+    skill_ids: list[str] = []
+    seen_skill_ids: set[str] = set()
+    for index, raw_skill_id in enumerate(value):
+        item_path = f"{path}[{index}]"
+        try:
+            skill_id = _decode_equipment_membership_id(
+                value=raw_skill_id,
+                field_name=field_name,
+            )
+            if skill_id in seen_skill_ids:
+                raise ValueError(f"{field_name} must not contain duplicate IDs")
+        except (TypeError, ValueError) as exc:
+            raise CatalogDecodeError(path=item_path, detail=str(exc)) from exc
+
+        skill_ids.append(skill_id)
+        seen_skill_ids.add(skill_id)
+
+    return tuple(skill_ids)
+
+
+def _decode_equipment_membership_id(*, value: object, field_name: str) -> str:
+    if type(value) is not str:
+        raise TypeError(f"{field_name} must contain only str")
+
+    if value == "":
+        raise ValueError(f"{field_name} must not contain empty IDs")
+
+    if value.strip() == "":
+        raise ValueError(f"{field_name} must not contain blank IDs")
+
+    if value != value.strip():
+        raise ValueError(
+            f"{field_name} must not contain IDs with leading or trailing whitespace"
+        )
+
+    return value
+
+
+def _reject_primary_membership_in_additional_ids(
+    *,
+    primary_skill_id: object,
+    additional_skill_ids: tuple[str, ...],
+    path: str,
+    additional_field_name: str,
+    primary_field_name: str,
+) -> None:
+    if (
+        type(primary_skill_id) is not str
+        or primary_skill_id not in additional_skill_ids
+    ):
+        return
+
+    duplicate_index = additional_skill_ids.index(primary_skill_id)
+    error = ValueError(f"{additional_field_name} must not contain {primary_field_name}")
+    raise CatalogDecodeError(
+        path=f"{path}[{duplicate_index}]",
+        detail=str(error),
+    ) from error
 
 
 def decode_catalog(

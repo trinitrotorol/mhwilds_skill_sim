@@ -333,28 +333,40 @@ def _normalize_raw_armor(
         path=f"{path}.armorSet",
     )
     slots = _normalize_slots(value=value["slots"], path=f"{path}.slots")
-    skills = _normalize_armor_skills(
-        value=value["skills"],
-        skills_by_id=skills_by_id,
-        path=f"{path}.skills",
+    skills, additional_series_skill_ids, additional_group_skill_ids = (
+        _normalize_armor_skills(
+            value=value["skills"],
+            skills_by_id=skills_by_id,
+            series_skill_id=armor_set.series_skill_id,
+            group_skill_id=armor_set.group_skill_id,
+            path=f"{path}.skills",
+        )
     )
     equipment_id = f"mhdb:armor:{armor_set.game_id}:{kind}"
 
-    return (
+    normalized_equipment: dict[str, object] = {
+        "equipment_id": equipment_id,
+        "display_name": name,
+        "part": kind,
+        "skills": skills,
+        "slots": slots,
+        "series_skill_id": armor_set.series_skill_id,
+        "group_skill_id": armor_set.group_skill_id,
+    }
+    if additional_series_skill_ids:
+        normalized_equipment["additional_series_skill_ids"] = (
+            additional_series_skill_ids
+        )
+    if additional_group_skill_ids:
+        normalized_equipment["additional_group_skill_ids"] = additional_group_skill_ids
+    normalized_equipment.update(
         {
-            "equipment_id": equipment_id,
-            "display_name": name,
-            "part": kind,
-            "skills": skills,
-            "slots": slots,
-            "series_skill_id": armor_set.series_skill_id,
-            "group_skill_id": armor_set.group_skill_id,
             "allows_series_skill_assignment": False,
             "allows_group_skill_assignment": False,
-        },
-        raw_id,
-        equipment_id,
+        }
     )
+
+    return normalized_equipment, raw_id, equipment_id
 
 
 def _resolve_armor_set(
@@ -417,30 +429,82 @@ def _normalize_armor_skills(
     *,
     value: object,
     skills_by_id: dict[str, SkillDefinition],
+    series_skill_id: str | None,
+    group_skill_id: str | None,
     path: str,
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], list[str], list[str]]:
     if type(value) is not list:
         _raise_normalization_error(
             path=path,
             error=TypeError("skills must be list"),
         )
 
-    return [
-        _normalize_armor_skill(
+    normalized_skills: list[dict[str, object]] = []
+    additional_series_skill_ids: list[str] = []
+    additional_group_skill_ids: list[str] = []
+    seen_series_skill_ids: set[str] = set()
+    seen_group_skill_ids: set[str] = set()
+
+    for index, raw_skill_rank in enumerate(value):
+        skill_path = f"{path}[{index}]"
+        skill, level = _resolve_armor_skill_rank(
             value=raw_skill_rank,
             skills_by_id=skills_by_id,
-            path=f"{path}[{index}]",
+            path=skill_path,
         )
-        for index, raw_skill_rank in enumerate(value)
-    ]
+
+        if skill.kind is SkillKind.ARMOR:
+            normalized_skills.append(
+                {
+                    "skill_id": skill.skill_id,
+                    "level": level,
+                }
+            )
+            continue
+
+        if skill.kind is SkillKind.SERIES:
+            if skill.skill_id in seen_series_skill_ids:
+                _raise_normalization_error(
+                    path=skill_path,
+                    error=ValueError("series skill marker must not be duplicated"),
+                )
+            seen_series_skill_ids.add(skill.skill_id)
+            if skill.skill_id != series_skill_id:
+                additional_series_skill_ids.append(skill.skill_id)
+            continue
+
+        if skill.kind is SkillKind.GROUP:
+            if skill.skill_id in seen_group_skill_ids:
+                _raise_normalization_error(
+                    path=skill_path,
+                    error=ValueError("group skill marker must not be duplicated"),
+                )
+            seen_group_skill_ids.add(skill.skill_id)
+            if skill.skill_id != group_skill_id:
+                additional_group_skill_ids.append(skill.skill_id)
+            continue
+
+        _raise_normalization_error(
+            path=skill_path,
+            error=ValueError(
+                "armor skills may reference armor, set, or group skills; "
+                "weapon skills are not supported"
+            ),
+        )
+
+    return (
+        normalized_skills,
+        additional_series_skill_ids,
+        additional_group_skill_ids,
+    )
 
 
-def _normalize_armor_skill(
+def _resolve_armor_skill_rank(
     *,
     value: object,
     skills_by_id: dict[str, SkillDefinition],
     path: str,
-) -> dict[str, object]:
+) -> tuple[SkillDefinition, int]:
     if type(value) is not dict:
         _raise_normalization_error(
             path=path,
@@ -489,16 +553,7 @@ def _normalize_armor_skill(
             path=f"{path}.level",
             error=ValueError("level must not exceed the referenced skill maximum rank"),
         )
-    if skill.kind is not SkillKind.ARMOR:
-        _raise_normalization_error(
-            path=path,
-            error=ValueError("skills must reference only armor skills"),
-        )
-
-    return {
-        "skill_id": skill.skill_id,
-        "level": level,
-    }
+    return skill, level
 
 
 def _decode_name(*, value: object, path: str) -> str:

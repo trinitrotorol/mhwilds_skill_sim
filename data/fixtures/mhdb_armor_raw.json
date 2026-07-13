@@ -15,6 +15,22 @@
         },
         "level": 1,
         "description": "ignored armor skill-rank field"
+      },
+      {
+        "skill": {
+          "gameId": 1003,
+          "name": "ignored series skill stub"
+        },
+        "level": 1,
+        "description": "ignored series membership marker"
+      },
+      {
+        "skill": {
+          "gameId": 1004,
+          "name": "ignored group skill stub"
+        },
+        "level": 1,
+        "description": "ignored group membership marker"
       }
     ],
     "slots": [

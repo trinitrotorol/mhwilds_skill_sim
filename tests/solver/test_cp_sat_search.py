@@ -88,6 +88,8 @@ def equipment_item(
     slots: tuple[DecorationSlot, ...] = (),
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    additional_series_skill_ids: tuple[str, ...] = (),
+    additional_group_skill_ids: tuple[str, ...] = (),
     allows_series_skill_assignment: bool = False,
     allows_group_skill_assignment: bool = False,
     weapon_kind: WeaponKind | None = None,
@@ -99,6 +101,8 @@ def equipment_item(
         slots=slots,
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        additional_series_skill_ids=additional_series_skill_ids,
+        additional_group_skill_ids=additional_group_skill_ids,
         allows_series_skill_assignment=allows_series_skill_assignment,
         allows_group_skill_assignment=allows_group_skill_assignment,
         weapon_kind=weapon_kind,
@@ -1005,6 +1009,45 @@ def test_group_bonus_can_satisfy_requirement() -> None:
 
     assert candidate is not None
     assert dict(candidate.skill_levels)[group_id] == 1
+
+
+def test_additional_series_memberships_can_satisfy_requirement() -> None:
+    series_id = "skill:cross-series"
+    replacements = {
+        part: equipment_item(
+            part,
+            additional_series_skill_ids=(series_id,),
+        )
+        for part in (EquipmentPart.HEAD, EquipmentPart.CHEST)
+    }
+    catalog = small_catalog(
+        equipment=complete_equipment(replacements=replacements),
+        skills=(bonus_skill(series_id, kind=SkillKind.SERIES, thresholds=(2,)),),
+    )
+
+    candidate = solve(catalog, (requirement(series_id),))
+
+    assert candidate is not None
+    assert dict(candidate.skill_levels)[series_id] == 1
+    assert validate_build(
+        equipment=candidate.equipment,
+        decorations=catalog.decorations,
+        placements=candidate.placements,
+    ) == BuildValidationResult((), ())
+
+
+def test_additional_group_membership_cannot_bypass_piece_threshold() -> None:
+    group_id = "skill:cross-group"
+    head = equipment_item(
+        EquipmentPart.HEAD,
+        additional_group_skill_ids=(group_id,),
+    )
+    catalog = small_catalog(
+        equipment=complete_equipment(replacements={EquipmentPart.HEAD: head}),
+        skills=(bonus_skill(group_id, kind=SkillKind.GROUP, thresholds=(2,)),),
+    )
+
+    assert solve(catalog, (requirement(group_id),)) is None
 
 
 def test_highest_activated_bonus_rank_is_returned() -> None:

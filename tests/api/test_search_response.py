@@ -30,6 +30,8 @@ def equipment_definition(
     *,
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    additional_series_skill_ids: tuple[str, ...] = (),
+    additional_group_skill_ids: tuple[str, ...] = (),
     skills: tuple[SkillContribution, ...] = (),
     slots: tuple[DecorationSlot, ...] = (),
     display_name: str | None = None,
@@ -42,6 +44,8 @@ def equipment_definition(
         slots=slots,
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        additional_series_skill_ids=additional_series_skill_ids,
+        additional_group_skill_ids=additional_group_skill_ids,
         display_name=display_name,
         weapon_kind=weapon_kind,
     )
@@ -118,6 +122,8 @@ def test_build_candidate_to_response_converts_candidate_to_dict() -> None:
                 "weapon_kind": "great-sword",
                 "series_skill_id": None,
                 "group_skill_id": None,
+                "series_skill_ids": [],
+                "group_skill_ids": [],
                 "skills": [],
                 "slots": [],
             },
@@ -128,6 +134,8 @@ def test_build_candidate_to_response_converts_candidate_to_dict() -> None:
                 "weapon_kind": None,
                 "series_skill_id": None,
                 "group_skill_id": None,
+                "series_skill_ids": [],
+                "group_skill_ids": [],
                 "skills": [],
                 "slots": [],
             },
@@ -170,6 +178,8 @@ def test_build_candidate_to_response_key_order() -> None:
         "weapon_kind",
         "series_skill_id",
         "group_skill_id",
+        "series_skill_ids",
+        "group_skill_ids",
         "skills",
         "slots",
     ]
@@ -196,6 +206,8 @@ def test_build_candidate_to_response_uses_equipment_part_value() -> None:
             "weapon_kind": None,
             "series_skill_id": None,
             "group_skill_id": None,
+            "series_skill_ids": [],
+            "group_skill_ids": [],
             "skills": [],
             "slots": [],
         },
@@ -210,6 +222,8 @@ def test_build_candidate_to_response_serializes_membership_values() -> None:
                     equipment_id="equipment:weapon",
                     series_skill_id="skill:series-bonus",
                     group_skill_id="skill:group-bonus",
+                    additional_series_skill_ids=("skill:cross-series",),
+                    additional_group_skill_ids=("skill:cross-group",),
                 ),
                 equipment_definition(
                     EquipmentPart.HEAD,
@@ -227,6 +241,8 @@ def test_build_candidate_to_response_serializes_membership_values() -> None:
             "weapon_kind": None,
             "series_skill_id": "skill:series-bonus",
             "group_skill_id": "skill:group-bonus",
+            "series_skill_ids": ["skill:series-bonus", "skill:cross-series"],
+            "group_skill_ids": ["skill:group-bonus", "skill:cross-group"],
             "skills": [],
             "slots": [],
         },
@@ -237,6 +253,8 @@ def test_build_candidate_to_response_serializes_membership_values() -> None:
             "weapon_kind": None,
             "series_skill_id": None,
             "group_skill_id": None,
+            "series_skill_ids": [],
+            "group_skill_ids": [],
             "skills": [],
             "slots": [],
         },
@@ -253,6 +271,7 @@ def test_same_equipment_id_variants_serialize_with_distinct_memberships() -> Non
                             equipment_id="equipment:weapon:artian",
                             series_skill_id="skill:series-a",
                             group_skill_id="skill:group-a",
+                            additional_series_skill_ids=("skill:cross-a",),
                             display_name="Artian Bow",
                             weapon_kind=WeaponKind.BOW,
                         ),
@@ -264,6 +283,7 @@ def test_same_equipment_id_variants_serialize_with_distinct_memberships() -> Non
                             equipment_id="equipment:weapon:artian",
                             series_skill_id="skill:series-b",
                             group_skill_id="skill:group-b",
+                            additional_series_skill_ids=("skill:cross-b",),
                             display_name="Artian Bow",
                             weapon_kind=WeaponKind.BOW,
                         ),
@@ -284,6 +304,14 @@ def test_same_equipment_id_variants_serialize_with_distinct_memberships() -> Non
     )
     assert equipment_responses[0]["series_skill_id"] == "skill:series-a"
     assert equipment_responses[1]["series_skill_id"] == "skill:series-b"
+    assert equipment_responses[0]["series_skill_ids"] == [
+        "skill:series-a",
+        "skill:cross-a",
+    ]
+    assert equipment_responses[1]["series_skill_ids"] == [
+        "skill:series-b",
+        "skill:cross-b",
+    ]
     assert equipment_responses[0]["display_name"] == "Artian Bow"
     assert equipment_responses[1]["weapon_kind"] == "bow"
     assert "allows_series_skill_assignment" not in equipment_responses[0]
@@ -320,6 +348,8 @@ def test_build_candidate_to_response_serializes_fixed_equipment_skills_and_slots
             "weapon_kind": None,
             "series_skill_id": None,
             "group_skill_id": None,
+            "series_skill_ids": [],
+            "group_skill_ids": [],
             "skills": [
                 {"skill_id": "skill:critical-eye", "level": 2},
                 {"skill_id": "skill:weakness-exploit", "level": 1},
@@ -439,6 +469,14 @@ def test_build_candidate_to_response_returns_new_mutable_containers_each_call() 
     assert first["equipment"][0] is not second["equipment"][0]  # type: ignore[index]
     assert first["equipment"][0]["skills"] is not second["equipment"][0]["skills"]  # type: ignore[index]
     assert first["equipment"][0]["slots"] is not second["equipment"][0]["slots"]  # type: ignore[index]
+    assert (
+        first["equipment"][0]["series_skill_ids"]
+        is not second["equipment"][0]["series_skill_ids"]
+    )  # type: ignore[index]
+    assert (
+        first["equipment"][0]["group_skill_ids"]
+        is not second["equipment"][0]["group_skill_ids"]
+    )  # type: ignore[index]
     assert first["equipment"][0]["skills"][0] is not second["equipment"][0]["skills"][0]  # type: ignore[index]
     assert first["equipment"][0]["slots"][0] is not second["equipment"][0]["slots"][0]  # type: ignore[index]
     assert first["placements"] is not second["placements"]
@@ -454,6 +492,8 @@ def test_build_candidate_to_response_returns_new_mutable_containers_each_call() 
     )
     first["equipment"][0]["skills"][0]["level"] = 999  # type: ignore[index]
     first["equipment"][0]["slots"][0]["level"] = 999  # type: ignore[index]
+    first["equipment"][0]["series_skill_ids"].append("skill:changed")  # type: ignore[index]
+    first["equipment"][0]["group_skill_ids"].append("skill:changed")  # type: ignore[index]
     first["skill_levels"][0]["level"] = 999  # type: ignore[index]
 
     assert second == build_candidate_to_response(candidate=build)

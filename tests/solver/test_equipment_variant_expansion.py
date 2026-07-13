@@ -31,6 +31,8 @@ def equipment_definition(
     *,
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    additional_series_skill_ids: tuple[str, ...] = (),
+    additional_group_skill_ids: tuple[str, ...] = (),
     allows_series_skill_assignment: bool = False,
     allows_group_skill_assignment: bool = False,
 ) -> EquipmentDefinition:
@@ -41,6 +43,8 @@ def equipment_definition(
         slots=(weapon_slot(2),),
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        additional_series_skill_ids=additional_series_skill_ids,
+        additional_group_skill_ids=additional_group_skill_ids,
         allows_series_skill_assignment=allows_series_skill_assignment,
         allows_group_skill_assignment=allows_group_skill_assignment,
     )
@@ -163,6 +167,23 @@ def test_group_only_assignment_expands_in_definition_order() -> None:
         (None, "skill:group-a"),
         (None, "skill:group-b"),
     )
+
+
+def test_replace_preserves_additional_memberships_during_assignment() -> None:
+    template = equipment_definition(
+        additional_series_skill_ids=("skill:fixed-cross-series",),
+        allows_group_skill_assignment=True,
+    )
+
+    result = expand(
+        equipment=(template,),
+        skill_definitions=(group_skill_definition("skill:group-a"),),
+    )
+
+    assert len(result) == 1
+    assert result[0].group_skill_id == "skill:group-a"
+    assert result[0].additional_series_skill_ids == ("skill:fixed-cross-series",)
+    assert result[0].series_skill_ids == ("skill:fixed-cross-series",)
 
 
 def test_dual_assignment_expands_cartesian_product_in_exact_order() -> None:

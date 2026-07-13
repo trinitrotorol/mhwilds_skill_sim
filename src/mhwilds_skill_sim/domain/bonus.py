@@ -38,34 +38,34 @@ def calculate_equipment_bonus_skill_contributions(
     series_piece_counts: dict[str, int] = {}
     group_piece_counts: dict[str, int] = {}
     for definition in equipment:
-        if definition.series_skill_id is not None:
-            series_skill = definitions_by_id.get(definition.series_skill_id)
+        for series_skill_id in dict.fromkeys(definition.series_skill_ids):
+            series_skill = definitions_by_id.get(series_skill_id)
             if series_skill is None:
                 raise ValueError(
-                    "equipment series_skill_id must reference skill_definitions"
+                    "equipment series_skill_ids must reference skill_definitions"
                 )
             if series_skill.kind is not SkillKind.SERIES:
                 raise ValueError(
-                    "equipment series_skill_id must reference a series skill in "
+                    "equipment series_skill_ids must reference a series skill in "
                     "skill_definitions"
                 )
-            series_piece_counts[definition.series_skill_id] = (
-                series_piece_counts.get(definition.series_skill_id, 0) + 1
+            series_piece_counts[series_skill_id] = (
+                series_piece_counts.get(series_skill_id, 0) + 1
             )
 
-        if definition.group_skill_id is not None:
-            group_skill = definitions_by_id.get(definition.group_skill_id)
+        for group_skill_id in dict.fromkeys(definition.group_skill_ids):
+            group_skill = definitions_by_id.get(group_skill_id)
             if group_skill is None:
                 raise ValueError(
-                    "equipment group_skill_id must reference skill_definitions"
+                    "equipment group_skill_ids must reference skill_definitions"
                 )
             if group_skill.kind is not SkillKind.GROUP:
                 raise ValueError(
-                    "equipment group_skill_id must reference a group skill in "
+                    "equipment group_skill_ids must reference a group skill in "
                     "skill_definitions"
                 )
-            group_piece_counts[definition.group_skill_id] = (
-                group_piece_counts.get(definition.group_skill_id, 0) + 1
+            group_piece_counts[group_skill_id] = (
+                group_piece_counts.get(group_skill_id, 0) + 1
             )
 
     contributions: list[SkillContribution] = []

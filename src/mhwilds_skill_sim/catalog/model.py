@@ -119,6 +119,19 @@ class Catalog:
                         "equipment series_skill_id must reference a series skill"
                     )
 
+            for series_skill_id in equipment.additional_series_skill_ids:
+                series_skill = skills_by_id.get(series_skill_id)
+                if series_skill is None:
+                    raise ValueError(
+                        "equipment additional_series_skill_ids must reference "
+                        "existing skills"
+                    )
+                if series_skill.kind is not SkillKind.SERIES:
+                    raise ValueError(
+                        "equipment additional_series_skill_ids must reference only "
+                        "series skills"
+                    )
+
             if equipment.group_skill_id is not None:
                 group_skill = skills_by_id.get(equipment.group_skill_id)
                 if group_skill is None:
@@ -128,6 +141,19 @@ class Catalog:
                 if group_skill.kind is not SkillKind.GROUP:
                     raise ValueError(
                         "equipment group_skill_id must reference a group skill"
+                    )
+
+            for group_skill_id in equipment.additional_group_skill_ids:
+                group_skill = skills_by_id.get(group_skill_id)
+                if group_skill is None:
+                    raise ValueError(
+                        "equipment additional_group_skill_ids must reference existing "
+                        "skills"
+                    )
+                if group_skill.kind is not SkillKind.GROUP:
+                    raise ValueError(
+                        "equipment additional_group_skill_ids must reference only "
+                        "group skills"
                     )
 
             if equipment.allows_series_skill_assignment and not has_series_skill:

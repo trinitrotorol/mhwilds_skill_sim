@@ -112,6 +112,8 @@ def equipment(
     allows_group_skill_assignment: bool = False,
     display_name: str | None = None,
     weapon_kind: WeaponKind | None = None,
+    additional_series_skill_ids: tuple[str, ...] = (),
+    additional_group_skill_ids: tuple[str, ...] = (),
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
@@ -124,6 +126,8 @@ def equipment(
         allows_group_skill_assignment=allows_group_skill_assignment,
         display_name=display_name,
         weapon_kind=weapon_kind,
+        additional_series_skill_ids=additional_series_skill_ids,
+        additional_group_skill_ids=additional_group_skill_ids,
     )
 
 
@@ -163,6 +167,25 @@ def equipment_with_assignment_value(
         skills=(),
         slots=(),
         **assignments,  # type: ignore[arg-type]
+    )
+
+
+def equipment_with_additional_membership_value(
+    *,
+    field_name: str,
+    value: object,
+) -> EquipmentDefinition:
+    memberships: dict[str, object] = {
+        "additional_series_skill_ids": (),
+        "additional_group_skill_ids": (),
+    }
+    memberships[field_name] = value
+    return EquipmentDefinition(
+        equipment_id="weapon:great-sword:hope-blade",
+        part=EquipmentPart.WEAPON,
+        skills=(skill(),),
+        slots=(weapon_slot(1),),
+        **memberships,  # type: ignore[arg-type]
     )
 
 
@@ -623,6 +646,233 @@ def test_equipment_definition_does_not_look_up_or_classify_memberships() -> None
 
     assert definition.series_skill_id == "skill:not-in-a-catalog"
     assert definition.group_skill_id == "skill:not-in-a-catalog"
+
+
+def test_additional_memberships_default_to_empty_tuples() -> None:
+    definition = equipment()
+
+    assert definition.additional_series_skill_ids == ()
+    assert definition.additional_group_skill_ids == ()
+    assert definition.series_skill_ids == ()
+    assert definition.group_skill_ids == ()
+
+
+def test_complete_memberships_put_primary_before_ordered_additional_ids() -> None:
+    series_ids = ("skill:series-extra-b", "skill:series-extra-a")
+    group_ids = ("skill:group-extra-b", "skill:group-extra-a")
+
+    definition = equipment(
+        series_skill_id="skill:series-primary",
+        group_skill_id="skill:group-primary",
+        additional_series_skill_ids=series_ids,
+        additional_group_skill_ids=group_ids,
+    )
+
+    assert definition.additional_series_skill_ids is series_ids
+    assert definition.additional_group_skill_ids is group_ids
+    assert definition.series_skill_ids == (
+        "skill:series-primary",
+        "skill:series-extra-b",
+        "skill:series-extra-a",
+    )
+    assert definition.group_skill_ids == (
+        "skill:group-primary",
+        "skill:group-extra-b",
+        "skill:group-extra-a",
+    )
+    assert type(definition.series_skill_ids) is tuple
+    assert type(definition.group_skill_ids) is tuple
+
+
+def test_complete_memberships_support_additional_ids_without_primary() -> None:
+    definition = equipment(
+        additional_series_skill_ids=("skill:series-extra",),
+        additional_group_skill_ids=("skill:group-extra",),
+    )
+
+    assert definition.series_skill_ids == ("skill:series-extra",)
+    assert definition.group_skill_ids == ("skill:group-extra",)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+@pytest.mark.parametrize("value", [[], set(), frozenset(), None])
+def test_additional_memberships_reject_non_tuple_values(
+    field_name: str,
+    value: object,
+) -> None:
+    with pytest.raises(TypeError, match=field_name):
+        equipment_with_additional_membership_value(
+            field_name=field_name,
+            value=value,
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+def test_additional_memberships_reject_tuple_subclasses(field_name: str) -> None:
+    class MembershipTuple(tuple[str, ...]):
+        pass
+
+    with pytest.raises(TypeError, match=field_name):
+        equipment_with_additional_membership_value(
+            field_name=field_name,
+            value=MembershipTuple(("skill:bonus",)),
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+@pytest.mark.parametrize("value", [None, True, 1, object()])
+def test_additional_memberships_reject_non_string_elements(
+    field_name: str,
+    value: object,
+) -> None:
+    with pytest.raises(TypeError, match=field_name):
+        equipment_with_additional_membership_value(
+            field_name=field_name,
+            value=(value,),
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+def test_additional_memberships_reject_string_subclasses(field_name: str) -> None:
+    class MembershipId(str):
+        pass
+
+    with pytest.raises(TypeError, match=field_name):
+        equipment_with_additional_membership_value(
+            field_name=field_name,
+            value=(MembershipId("skill:bonus"),),
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+@pytest.mark.parametrize("value", ["", " ", "\t\n", " skill:bonus", "skill:bonus "])
+def test_additional_memberships_reject_invalid_strings(
+    field_name: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        equipment_with_additional_membership_value(
+            field_name=field_name,
+            value=(value,),
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["additional_series_skill_ids", "additional_group_skill_ids"],
+)
+def test_additional_memberships_reject_duplicate_ids(field_name: str) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        equipment_with_additional_membership_value(
+            field_name=field_name,
+            value=("skill:bonus", "skill:bonus"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("primary_field", "additional_field"),
+    [
+        ("series_skill_id", "additional_series_skill_ids"),
+        ("group_skill_id", "additional_group_skill_ids"),
+    ],
+)
+def test_additional_memberships_reject_primary_membership_duplicate(
+    primary_field: str,
+    additional_field: str,
+) -> None:
+    values = {
+        primary_field: "skill:bonus",
+        additional_field: ("skill:bonus",),
+    }
+
+    with pytest.raises(ValueError, match=additional_field):
+        EquipmentDefinition(
+            equipment_id="weapon:great-sword:hope-blade",
+            part=EquipmentPart.WEAPON,
+            skills=(),
+            slots=(),
+            **values,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("assignment_field", "additional_field"),
+    [
+        ("allows_series_skill_assignment", "additional_series_skill_ids"),
+        ("allows_group_skill_assignment", "additional_group_skill_ids"),
+    ],
+)
+def test_additional_memberships_conflict_with_assignment_capability(
+    assignment_field: str,
+    additional_field: str,
+) -> None:
+    values = {
+        assignment_field: True,
+        additional_field: ("skill:bonus",),
+    }
+
+    with pytest.raises(ValueError, match=assignment_field):
+        EquipmentDefinition(
+            equipment_id="weapon:great-sword:hope-blade",
+            part=EquipmentPart.WEAPON,
+            skills=(),
+            slots=(),
+            **values,  # type: ignore[arg-type]
+        )
+
+
+def test_equipment_value_semantics_include_additional_memberships() -> None:
+    definition = equipment(
+        additional_series_skill_ids=("skill:series-extra",),
+        additional_group_skill_ids=("skill:group-extra",),
+    )
+    equal_definition = equipment(
+        additional_series_skill_ids=("skill:series-extra",),
+        additional_group_skill_ids=("skill:group-extra",),
+    )
+
+    assert definition == equal_definition
+    assert hash(definition) == hash(equal_definition)
+    assert definition != equipment()
+    with pytest.raises(FrozenInstanceError):
+        definition.additional_series_skill_ids = ()
+
+
+def test_additional_membership_fields_follow_all_existing_positional_fields() -> None:
+    definition = EquipmentDefinition(
+        "weapon:great-sword:hope-blade",
+        EquipmentPart.WEAPON,
+        (),
+        (),
+        "skill:series-primary",
+        "skill:group-primary",
+        False,
+        False,
+        "Hope Blade",
+        WeaponKind.GREAT_SWORD,
+        ("skill:series-extra",),
+        ("skill:group-extra",),
+    )
+
+    assert definition.display_name == "Hope Blade"
+    assert definition.weapon_kind is WeaponKind.GREAT_SWORD
+    assert definition.additional_series_skill_ids == ("skill:series-extra",)
+    assert definition.additional_group_skill_ids == ("skill:group-extra",)
 
 
 @pytest.mark.parametrize("equipment_id", ["", " ", "\t\n"])

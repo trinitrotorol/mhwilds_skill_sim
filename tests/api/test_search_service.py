@@ -413,6 +413,8 @@ def test_empty_requirement_response_exposes_resolved_artian_memberships() -> Non
     assert weapon["equipment_id"] == "fixture:weapon:training-blade"
     assert weapon["series_skill_id"] == "skill:fixture-series-bonus"
     assert weapon["group_skill_id"] == "skill:fixture-group-bonus"
+    assert weapon["series_skill_ids"] == ["skill:fixture-series-bonus"]
+    assert weapon["group_skill_ids"] == ["skill:fixture-group-bonus"]
     json.dumps(response)
 
 
@@ -789,6 +791,8 @@ def test_generated_weapon_skill_payload_exposes_charm_and_artian_details() -> No
     ]
     assert weapon["series_skill_id"] == "skill:fixture-series-bonus"
     assert weapon["group_skill_id"] == "skill:fixture-group-bonus"
+    assert weapon["series_skill_ids"] == ["skill:fixture-series-bonus"]
+    assert weapon["group_skill_ids"] == ["skill:fixture-group-bonus"]
     assert response["total_count"] > 1  # type: ignore[operator]
     assert response["truncated"] is True
     json.dumps(response)

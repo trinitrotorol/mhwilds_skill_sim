@@ -27,6 +27,8 @@ def build_candidate_to_response(
                 ),
                 "series_skill_id": equipment.series_skill_id,
                 "group_skill_id": equipment.group_skill_id,
+                "series_skill_ids": list(equipment.series_skill_ids),
+                "group_skill_ids": list(equipment.group_skill_ids),
                 "skills": [
                     {
                         "skill_id": skill.skill_id,

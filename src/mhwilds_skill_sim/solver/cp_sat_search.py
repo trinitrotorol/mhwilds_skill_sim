@@ -433,14 +433,14 @@ def _add_skill_requirement_constraints(
                     variable
                     for choices in equipment_variables.values()
                     for equipment, variable in choices
-                    if equipment.series_skill_id == requirement.skill_id
+                    if requirement.skill_id in equipment.series_skill_ids
                 ]
             else:
                 selected_piece_terms = [
                     variable
                     for choices in equipment_variables.values()
                     for equipment, variable in choices
-                    if equipment.group_skill_id == requirement.skill_id
+                    if requirement.skill_id in equipment.group_skill_ids
                 ]
 
             selected_piece_count = sum(selected_piece_terms, 0)

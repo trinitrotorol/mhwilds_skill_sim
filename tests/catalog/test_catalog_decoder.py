@@ -1021,6 +1021,90 @@ def test_decode_catalog_accepts_explicit_null_memberships_without_skills() -> No
     assert catalog.equipment[0].group_skill_id is None
 
 
+def test_decode_catalog_accepts_complete_equipment_memberships() -> None:
+    equipment = equipment_value(
+        series_skill_id="skill:series-primary",
+        group_skill_id="skill:group-primary",
+    )
+    equipment["additional_series_skill_ids"] = ["skill:series-extra"]
+    equipment["additional_group_skill_ids"] = ["skill:group-extra"]
+    value = catalog_value()
+    value["equipment"] = [equipment]
+    value["skills"] = [
+        series_skill_definition_value("skill:series-primary"),
+        series_skill_definition_value("skill:series-extra"),
+        group_skill_definition_value("skill:group-primary"),
+        group_skill_definition_value("skill:group-extra"),
+    ]
+
+    decoded = decode_catalog(value=value)
+
+    assert decoded.equipment[0].series_skill_ids == (
+        "skill:series-primary",
+        "skill:series-extra",
+    )
+    assert decoded.equipment[0].group_skill_ids == (
+        "skill:group-primary",
+        "skill:group-extra",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "missing_skill_id"),
+    [
+        ("additional_series_skill_ids", "skill:missing-series"),
+        ("additional_group_skill_ids", "skill:missing-group"),
+    ],
+)
+def test_decode_catalog_wraps_missing_additional_membership_at_root(
+    field_name: str,
+    missing_skill_id: str,
+) -> None:
+    equipment = equipment_value()
+    equipment[field_name] = [missing_skill_id]
+    value = catalog_value()
+    value["equipment"] = [equipment]
+    value["skills"] = []
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert field_name.replace("additional_", "") in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "wrong_skill"),
+    [
+        (
+            "additional_series_skill_ids",
+            group_skill_definition_value("skill:wrong-series"),
+        ),
+        (
+            "additional_group_skill_ids",
+            series_skill_definition_value("skill:wrong-group"),
+        ),
+    ],
+)
+def test_decode_catalog_wraps_wrong_kind_additional_membership_at_root(
+    field_name: str,
+    wrong_skill: dict[str, object],
+) -> None:
+    equipment = equipment_value()
+    equipment[field_name] = [wrong_skill["skill_id"]]
+    value = catalog_value()
+    value["equipment"] = [equipment]
+    value["skills"] = [wrong_skill]
+
+    with pytest.raises(CatalogDecodeError) as exc_info:
+        decode_catalog(value=value, path="$.catalog")
+
+    assert exc_info.value.path == "$.catalog"
+    assert field_name.replace("additional_", "") in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
 def test_catalog_decode_error_still_imports_directly() -> None:
     error = CatalogDecodeError(path="$.catalog", detail="invalid object")
 

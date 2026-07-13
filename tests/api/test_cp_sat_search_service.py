@@ -363,6 +363,8 @@ def test_timeout_result_preserves_serialized_partial_candidates(
             "weapon_kind": "bow",
             "series_skill_id": None,
             "group_skill_id": None,
+            "series_skill_ids": [],
+            "group_skill_ids": [],
             "skills": [],
             "slots": [],
         }
@@ -429,6 +431,8 @@ def test_generated_appraisal_charm_and_resolved_artian_reach_http_shape() -> Non
     assert weapon["weapon_kind"] == "great-sword"
     assert weapon["series_skill_id"] == series_skill_id
     assert weapon["group_skill_id"] == group_skill_id
+    assert weapon["series_skill_ids"] == [series_skill_id]
+    assert weapon["group_skill_ids"] == [group_skill_id]
     assert charm["equipment_id"].startswith("generated:appraisal-charm:")
     assert charm["skills"] == [{"skill_id": appraisal_skill_id, "level": 1}]
     assert response["exhausted"] is True

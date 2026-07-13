@@ -71,6 +71,8 @@ def equipment_definition(
     *,
     skills: tuple[SkillContribution, ...] = (),
     slots: tuple[DecorationSlot, ...] = (),
+    additional_series_skill_ids: tuple[str, ...] = (),
+    additional_group_skill_ids: tuple[str, ...] = (),
     allows_series_skill_assignment: bool = False,
     allows_group_skill_assignment: bool = False,
     weapon_kind: WeaponKind | None = None,
@@ -80,6 +82,8 @@ def equipment_definition(
         part=part,
         skills=skills,
         slots=slots,
+        additional_series_skill_ids=additional_series_skill_ids,
+        additional_group_skill_ids=additional_group_skill_ids,
         allows_series_skill_assignment=allows_series_skill_assignment,
         allows_group_skill_assignment=allows_group_skill_assignment,
         weapon_kind=weapon_kind,
@@ -325,6 +329,40 @@ def test_series_level_one_requirement_includes_both_head_routes() -> None:
         "fixture:head:precision-alpha",
         "fixture:head:tenderizer-beta",
     }
+
+
+def test_exhaustive_search_satisfies_additional_series_membership_requirement() -> None:
+    series_id = "skill:cross-series"
+    base_equipment = complete_equipment()
+    head = equipment_definition(
+        EquipmentPart.HEAD,
+        additional_series_skill_ids=(series_id,),
+    )
+    chest = equipment_definition(
+        EquipmentPart.CHEST,
+        additional_series_skill_ids=(series_id,),
+    )
+    catalog = Catalog(
+        schema_version=1,
+        equipment=(base_equipment[0], head, chest, *base_equipment[3:]),
+        decorations=(),
+        skills=(
+            SkillDefinition(
+                skill_id=series_id,
+                kind=SkillKind.SERIES,
+                ranks=(SkillRankDefinition(level=1, required_pieces=2),),
+            ),
+        ),
+    )
+
+    result = catalog_search(
+        catalog=catalog,
+        requirements=(requirement(series_id),),
+    )
+
+    assert len(result) == 1
+    assert result[0].equipment == catalog.equipment
+    assert dict(result[0].skill_levels)[series_id] == 1
 
 
 def test_beta_head_empty_placement_candidate_has_artian_boosted_bonuses() -> None:

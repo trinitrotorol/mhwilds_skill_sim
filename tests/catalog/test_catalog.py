@@ -41,6 +41,8 @@ def equipment(
     group_skill_id: str | None = None,
     allows_series_skill_assignment: bool = False,
     allows_group_skill_assignment: bool = False,
+    additional_series_skill_ids: tuple[str, ...] = (),
+    additional_group_skill_ids: tuple[str, ...] = (),
 ) -> EquipmentDefinition:
     return EquipmentDefinition(
         equipment_id=equipment_id,
@@ -51,6 +53,8 @@ def equipment(
         group_skill_id=group_skill_id,
         allows_series_skill_assignment=allows_series_skill_assignment,
         allows_group_skill_assignment=allows_group_skill_assignment,
+        additional_series_skill_ids=additional_series_skill_ids,
+        additional_group_skill_ids=additional_group_skill_ids,
     )
 
 
@@ -221,6 +225,104 @@ def test_catalog_accepts_simultaneous_membership_references() -> None:
     )
 
     assert created.equipment == (equipment_item,)
+
+
+def test_catalog_accepts_complete_series_and_group_membership_references() -> None:
+    primary_series = series_skill_definition("skill:series-primary")
+    extra_series = series_skill_definition("skill:series-extra")
+    primary_group = group_skill_definition("skill:group-primary")
+    extra_group = group_skill_definition("skill:group-extra")
+    equipment_item = equipment(
+        series_skill_id=primary_series.skill_id,
+        group_skill_id=primary_group.skill_id,
+        additional_series_skill_ids=(extra_series.skill_id,),
+        additional_group_skill_ids=(extra_group.skill_id,),
+    )
+
+    created = catalog(
+        equipment_items=(equipment_item,),
+        skill_items=(primary_series, extra_series, primary_group, extra_group),
+    )
+
+    assert created.equipment[0].series_skill_ids == (
+        primary_series.skill_id,
+        extra_series.skill_id,
+    )
+    assert created.equipment[0].group_skill_ids == (
+        primary_group.skill_id,
+        extra_group.skill_id,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "missing_skill_id"),
+    [
+        ("additional_series_skill_ids", "skill:missing-series"),
+        ("additional_group_skill_ids", "skill:missing-group"),
+    ],
+)
+def test_catalog_rejects_missing_additional_membership_reference(
+    field_name: str,
+    missing_skill_id: str,
+) -> None:
+    memberships = {field_name: (missing_skill_id,)}
+    equipment_item = EquipmentDefinition(
+        equipment_id="equipment:weapon:training-blade",
+        part=EquipmentPart.WEAPON,
+        skills=(),
+        slots=(),
+        **memberships,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(equipment_items=(equipment_item,), skill_items=())
+
+    assert "equipment" in str(exc_info.value)
+    assert field_name.replace("additional_", "") in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "wrong_skill"),
+    [
+        (
+            "additional_series_skill_ids",
+            skill_definition("skill:wrong-series", SkillKind.ARMOR),
+        ),
+        (
+            "additional_series_skill_ids",
+            group_skill_definition("skill:wrong-series"),
+        ),
+        (
+            "additional_group_skill_ids",
+            skill_definition("skill:wrong-group", SkillKind.WEAPON),
+        ),
+        (
+            "additional_group_skill_ids",
+            series_skill_definition("skill:wrong-group"),
+        ),
+    ],
+)
+def test_catalog_rejects_additional_membership_reference_to_wrong_kind(
+    field_name: str,
+    wrong_skill: SkillDefinition,
+) -> None:
+    memberships = {field_name: (wrong_skill.skill_id,)}
+    equipment_item = EquipmentDefinition(
+        equipment_id="equipment:weapon:training-blade",
+        part=EquipmentPart.WEAPON,
+        skills=(),
+        slots=(),
+        **memberships,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        catalog(
+            equipment_items=(equipment_item,),
+            skill_items=(wrong_skill,),
+        )
+
+    assert "equipment" in str(exc_info.value)
+    assert field_name.replace("additional_", "") in str(exc_info.value)
 
 
 def test_catalog_allows_unused_series_and_group_skill_definitions() -> None:

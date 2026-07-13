@@ -36,6 +36,36 @@ class WeaponKind(StrEnum):
     SWORD_SHIELD = "sword-shield"
 
 
+def _validate_additional_skill_ids(
+    *,
+    field_name: str,
+    skill_ids: tuple[str, ...],
+) -> None:
+    if type(skill_ids) is not tuple:
+        raise TypeError(f"{field_name} must be tuple")
+
+    seen_skill_ids: set[str] = set()
+    for skill_id in skill_ids:
+        if type(skill_id) is not str:
+            raise TypeError(f"{field_name} must contain only str")
+
+        if skill_id == "":
+            raise ValueError(f"{field_name} must not contain empty IDs")
+
+        if skill_id.strip() == "":
+            raise ValueError(f"{field_name} must not contain blank IDs")
+
+        if skill_id != skill_id.strip():
+            raise ValueError(
+                f"{field_name} must not contain IDs with leading or trailing whitespace"
+            )
+
+        if skill_id in seen_skill_ids:
+            raise ValueError(f"{field_name} must not contain duplicate IDs")
+
+        seen_skill_ids.add(skill_id)
+
+
 @dataclass(frozen=True, slots=True)
 class EquipmentDefinition:
     equipment_id: str
@@ -48,6 +78,8 @@ class EquipmentDefinition:
     allows_group_skill_assignment: bool = False
     display_name: str | None = None
     weapon_kind: WeaponKind | None = None
+    additional_series_skill_ids: tuple[str, ...] = ()
+    additional_group_skill_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.equipment_id) is not str:
@@ -117,20 +149,45 @@ class EquipmentDefinition:
                     "group_skill_id must not have leading or trailing whitespace"
                 )
 
+        _validate_additional_skill_ids(
+            field_name="additional_series_skill_ids",
+            skill_ids=self.additional_series_skill_ids,
+        )
+        _validate_additional_skill_ids(
+            field_name="additional_group_skill_ids",
+            skill_ids=self.additional_group_skill_ids,
+        )
+
+        if self.series_skill_id in self.additional_series_skill_ids:
+            raise ValueError(
+                "additional_series_skill_ids must not contain series_skill_id"
+            )
+
+        if self.group_skill_id in self.additional_group_skill_ids:
+            raise ValueError(
+                "additional_group_skill_ids must not contain group_skill_id"
+            )
+
         if type(self.allows_series_skill_assignment) is not bool:
             raise TypeError("allows_series_skill_assignment must be bool")
 
         if type(self.allows_group_skill_assignment) is not bool:
             raise TypeError("allows_group_skill_assignment must be bool")
 
-        if self.allows_series_skill_assignment and self.series_skill_id is not None:
+        if self.allows_series_skill_assignment and (
+            self.series_skill_id is not None or self.additional_series_skill_ids
+        ):
             raise ValueError(
-                "allows_series_skill_assignment requires series_skill_id to be None"
+                "allows_series_skill_assignment requires series_skill_id to be None "
+                "and additional_series_skill_ids to be empty"
             )
 
-        if self.allows_group_skill_assignment and self.group_skill_id is not None:
+        if self.allows_group_skill_assignment and (
+            self.group_skill_id is not None or self.additional_group_skill_ids
+        ):
             raise ValueError(
-                "allows_group_skill_assignment requires group_skill_id to be None"
+                "allows_group_skill_assignment requires group_skill_id to be None "
+                "and additional_group_skill_ids to be empty"
             )
 
         if (
@@ -163,3 +220,17 @@ class EquipmentDefinition:
 
             if self.part is not EquipmentPart.WEAPON:
                 raise ValueError("weapon_kind requires weapon equipment")
+
+    @property
+    def series_skill_ids(self) -> tuple[str, ...]:
+        if self.series_skill_id is None:
+            return self.additional_series_skill_ids
+
+        return (self.series_skill_id, *self.additional_series_skill_ids)
+
+    @property
+    def group_skill_ids(self) -> tuple[str, ...]:
+        if self.group_skill_id is None:
+            return self.additional_group_skill_ids
+
+        return (self.group_skill_id, *self.additional_group_skill_ids)

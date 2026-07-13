@@ -524,18 +524,9 @@ def test_rejects_unknown_armor_skill_game_id() -> None:
     assert isinstance(exc_info.value.__cause__, ValueError)
 
 
-@pytest.mark.parametrize("kind", ["weapon", "set", "group"])
-def test_rejects_non_armor_skill_kind(kind: str) -> None:
+def test_rejects_weapon_skill_kind() -> None:
     skills = load_skill_fixture()
-    skills[0]["kind"] = kind
-    if kind in ("set", "group"):
-        skills[0]["ranks"] = [
-            {
-                "level": 1,
-                "setPiecesRequired": 2,
-                "description": "ignored",
-            }
-        ]
+    skills[0]["kind"] = "weapon"
 
     with pytest.raises(CatalogDecodeError) as exc_info:
         normalize_mhdb_armor_snapshot(
@@ -546,6 +537,9 @@ def test_rejects_non_armor_skill_kind(kind: str) -> None:
 
     assert exc_info.value.path == "$.armor[0].skills[0]"
     assert "armor" in exc_info.value.detail
+    assert "set" in exc_info.value.detail
+    assert "group" in exc_info.value.detail
+    assert "weapon" in exc_info.value.detail
     assert isinstance(exc_info.value.__cause__, ValueError)
 
 

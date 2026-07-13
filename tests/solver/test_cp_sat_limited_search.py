@@ -72,6 +72,8 @@ def equipment_item(
     slots: tuple[DecorationSlot, ...] = (),
     series_skill_id: str | None = None,
     group_skill_id: str | None = None,
+    additional_series_skill_ids: tuple[str, ...] = (),
+    additional_group_skill_ids: tuple[str, ...] = (),
     allows_series_skill_assignment: bool = False,
     allows_group_skill_assignment: bool = False,
     weapon_kind: WeaponKind | None = None,
@@ -83,6 +85,8 @@ def equipment_item(
         slots=slots,
         series_skill_id=series_skill_id,
         group_skill_id=group_skill_id,
+        additional_series_skill_ids=additional_series_skill_ids,
+        additional_group_skill_ids=additional_group_skill_ids,
         allows_series_skill_assignment=allows_series_skill_assignment,
         allows_group_skill_assignment=allows_group_skill_assignment,
         weapon_kind=weapon_kind,
@@ -1112,6 +1116,51 @@ def test_series_and_group_bonus_requirements_are_supported() -> None:
         requirements=requirements,
     )
     assert result.exhausted is True
+
+
+def test_primary_and_additional_membership_compositions_are_distinct_results() -> None:
+    series_id = "skill:cross-series"
+    primary_head = equipment_item(
+        EquipmentPart.HEAD,
+        "equipment:head:primary-series",
+        series_skill_id=series_id,
+    )
+    additional_head = equipment_item(
+        EquipmentPart.HEAD,
+        "equipment:head:additional-series",
+        additional_series_skill_ids=(series_id,),
+    )
+    cross_series_chest = equipment_item(
+        EquipmentPart.CHEST,
+        additional_series_skill_ids=(series_id,),
+    )
+    catalog = small_catalog(
+        equipment=(
+            complete_equipment()[0],
+            primary_head,
+            additional_head,
+            cross_series_chest,
+            *complete_equipment()[3:],
+        ),
+        skills=(bonus_skill(series_id, kind=SkillKind.SERIES, thresholds=(2,)),),
+    )
+
+    result = limited_search(
+        catalog,
+        (requirement(series_id),),
+        max_results=2,
+    )
+
+    heads = {
+        selected_item(candidate, EquipmentPart.HEAD).equipment_id
+        for candidate in result.candidates
+    }
+    assert heads == {primary_head.equipment_id, additional_head.equipment_id}
+    assert all(
+        dict(candidate.skill_levels)[series_id] == 1 for candidate in result.candidates
+    )
+    assert result.exhausted is True
+    assert result.timed_out is False
 
 
 def test_compound_decoration_satisfies_all_requirements() -> None:
