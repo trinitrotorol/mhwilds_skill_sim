@@ -81,7 +81,7 @@ def raw_charm(
     raw_id: object = 1101,
     *,
     game_id: object = -5001,
-    randomized: object = False,
+    random: object = False,
     ranks: object = ABSENT,
 ) -> dict[str, object]:
     if ranks is ABSENT:
@@ -89,7 +89,7 @@ def raw_charm(
     return {
         "id": raw_id,
         "gameId": game_id,
-        "randomized": randomized,
+        "random": random,
         "ranks": ranks,
         "rarity": "ignored parent extra",
     }
@@ -203,6 +203,7 @@ def test_fixture_output_has_exact_keys_and_excludes_upstream_fields() -> None:
         for ignored in (
             "id",
             "gameId",
+            "random",
             "randomized",
             "ranks",
             "name",
@@ -236,6 +237,30 @@ def test_fixture_output_decodes_and_is_unicode_json_serializable() -> None:
     assert "攻撃の護石Ⅰ（テスト）" in encoded
     assert "\\u653b" not in encoded
     assert "5003" not in encoded
+
+
+def test_fixture_uses_only_canonical_random_key() -> None:
+    charms = load_charms()
+
+    assert all("random" in charm for charm in charms)
+    assert all("randomized" not in charm for charm in charms)
+
+
+def test_legacy_randomized_alias_matches_canonical_without_mutating_input() -> None:
+    canonical = load_charms()
+    legacy = copy.deepcopy(canonical)
+    for charm in legacy:
+        charm["randomized"] = charm.pop("random")
+    before = copy.deepcopy(legacy)
+
+    assert normalize_mhdb_charm_snapshot(
+        value=legacy,
+        skill_snapshot=load_skills(),
+    ) == normalize_mhdb_charm_snapshot(
+        value=canonical,
+        skill_snapshot=load_skills(),
+    )
+    assert legacy == before
 
 
 def test_combined_document_has_exact_shape_and_equipment_order() -> None:
@@ -508,7 +533,7 @@ def test_rejects_parent_dict_subclass() -> None:
     )
 
 
-@pytest.mark.parametrize("key", ["id", "gameId", "randomized", "ranks"])
+@pytest.mark.parametrize("key", ["id", "gameId", "ranks"])
 def test_rejects_missing_parent_required_field(key: str) -> None:
     charm = raw_charm()
     del charm[key]
@@ -518,6 +543,19 @@ def test_rejects_missing_parent_required_field(key: str) -> None:
         expected_path=f"$.charms[0].{key}",
         expected_cause=ValueError,
     )
+
+
+def test_rejects_missing_random_flag_at_canonical_path() -> None:
+    charm = raw_charm()
+    del charm["random"]
+
+    error = expect_charm_error(
+        [charm],
+        expected_path="$.charms[0].random",
+        expected_cause=ValueError,
+    )
+    assert "random" in error.detail
+    assert "randomized" in error.detail
 
 
 @pytest.mark.parametrize(
@@ -540,9 +578,9 @@ def test_rejects_invalid_parent_id(raw_id: object, cause: type[Exception]) -> No
     )
 
 
-def test_rejects_later_duplicate_parent_id() -> None:
+def test_rejects_later_duplicate_parent_id_including_random_parent() -> None:
     expect_charm_error(
-        [raw_charm(), raw_charm(game_id=5002)],
+        [raw_charm(), raw_charm(game_id=5002, random=True, ranks=[])],
         expected_path="$.charms[1].id",
         expected_cause=ValueError,
     )
@@ -557,27 +595,64 @@ def test_rejects_invalid_parent_game_id(game_id: object) -> None:
     )
 
 
-def test_rejects_later_duplicate_game_id_including_randomized_parent() -> None:
+def test_rejects_later_duplicate_game_id_including_random_parent() -> None:
     expect_charm_error(
-        [raw_charm(), raw_charm(1102, game_id=-5001, randomized=True, ranks=[])],
+        [raw_charm(), raw_charm(1102, game_id=-5001, random=True, ranks=[])],
         expected_path="$.charms[1].gameId",
         expected_cause=ValueError,
     )
 
 
-@pytest.mark.parametrize("randomized", [0, 1, "false", None, [], {}])
-def test_rejects_non_bool_randomized(randomized: object) -> None:
+@pytest.mark.parametrize("random", [0, 1, "false", None, [], {}])
+def test_rejects_non_bool_canonical_random(random: object) -> None:
     expect_charm_error(
-        [raw_charm(randomized=randomized)],
+        [raw_charm(random=random)],
+        expected_path="$.charms[0].random",
+        expected_cause=TypeError,
+    )
+
+
+@pytest.mark.parametrize("randomized", [0, 1, "false", None, [], {}])
+def test_rejects_non_bool_legacy_randomized(randomized: object) -> None:
+    charm = raw_charm()
+    del charm["random"]
+    charm["randomized"] = randomized
+
+    expect_charm_error(
+        [charm],
         expected_path="$.charms[0].randomized",
         expected_cause=TypeError,
     )
 
 
+@pytest.mark.parametrize(
+    ("random", "randomized"),
+    [(False, False), (False, True)],
+)
+def test_rejects_both_random_flag_aliases(
+    random: bool,
+    randomized: bool,
+) -> None:
+    charm = raw_charm(random=random)
+    charm["randomized"] = randomized
+
+    error = expect_charm_error(
+        [charm],
+        expected_path="$.charms[0].randomized",
+        expected_cause=ValueError,
+    )
+    assert "random" in error.detail
+    assert "randomized" in error.detail
+
+
+@pytest.mark.parametrize("random", [False, True])
 @pytest.mark.parametrize("ranks", [None, {}, (), "ranks"])
-def test_rejects_non_list_parent_ranks(ranks: object) -> None:
+def test_rejects_non_list_parent_ranks_for_either_random_value(
+    ranks: object,
+    random: bool,
+) -> None:
     expect_charm_error(
-        [raw_charm(ranks=ranks)],
+        [raw_charm(random=random, ranks=ranks)],
         expected_path="$.charms[0].ranks",
         expected_cause=TypeError,
     )
@@ -594,23 +669,23 @@ def test_rejects_parent_ranks_list_subclass() -> None:
     )
 
 
-def test_rejects_empty_fixed_ranks_but_skips_randomized_rank_contents() -> None:
+def test_rejects_empty_fixed_ranks_but_skips_random_rank_contents() -> None:
     expect_charm_error(
         [raw_charm(ranks=[])],
         expected_path="$.charms[0].ranks",
         expected_cause=ValueError,
     )
-    randomized = [raw_charm(randomized=True, ranks=[None, {"malformed": "ignored"}])]
-    before = copy.deepcopy(randomized)
+    random_charms = [raw_charm(random=True, ranks=[None, {"malformed": "ignored"}])]
+    before = copy.deepcopy(random_charms)
 
     assert (
         normalize_mhdb_charm_snapshot(
-            value=randomized,
+            value=random_charms,
             skill_snapshot=load_skills(),
         )
         == []
     )
-    assert randomized == before
+    assert random_charms == before
 
 
 @pytest.mark.parametrize("rank", [None, "rank", [], ()])

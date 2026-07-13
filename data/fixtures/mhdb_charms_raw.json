@@ -2,7 +2,7 @@
   {
     "id": 1101,
     "gameId": -5001,
-    "randomized": false,
+    "random": false,
     "ranks": [
       {
         "id": 1202,
@@ -42,7 +42,7 @@
   {
     "id": 1102,
     "gameId": 5002,
-    "randomized": false,
+    "random": false,
     "ranks": [
       {
         "id": 1203,
@@ -74,7 +74,7 @@
   {
     "id": 1103,
     "gameId": 5003,
-    "randomized": true,
+    "random": true,
     "ranks": [],
     "description": "ignored randomized charm parent"
   }

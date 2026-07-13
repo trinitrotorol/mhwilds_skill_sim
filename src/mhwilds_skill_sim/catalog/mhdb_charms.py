@@ -16,7 +16,7 @@ from mhwilds_skill_sim.catalog.mhdb_weapons import (
 )
 from mhwilds_skill_sim.domain.skill import SkillDefinition, SkillKind
 
-_RAW_CHARM_REQUIRED_KEYS = ("id", "gameId", "randomized", "ranks")
+_RAW_CHARM_REQUIRED_KEYS = ("id", "gameId", "ranks")
 _RAW_RANK_REQUIRED_KEYS = ("id", "name", "level", "skills")
 _RAW_SKILL_RANK_REQUIRED_KEYS = ("skill", "level")
 
@@ -142,7 +142,7 @@ def _normalize_charms(
     seen_equipment_ids: set[str] = set()
     for index, raw_charm in enumerate(value):
         charm_path = f"{path}[{index}]"
-        raw_id, game_id, randomized, ranks = _decode_raw_charm(
+        raw_id, game_id, is_random, ranks = _decode_raw_charm(
             value=raw_charm,
             path=charm_path,
         )
@@ -161,7 +161,7 @@ def _normalize_charms(
             )
         seen_game_ids.add(game_id)
 
-        if randomized:
+        if is_random:
             continue
 
         fixed_ranks = _normalize_fixed_ranks(
@@ -211,12 +211,7 @@ def _decode_raw_charm(
         path=f"{path}.gameId",
         field_name="gameId",
     )
-    randomized = value["randomized"]
-    if type(randomized) is not bool:
-        _raise_normalization_error(
-            path=f"{path}.randomized",
-            error=TypeError("randomized must be bool"),
-        )
+    is_random = _decode_random_flag(value=value, path=path)
     ranks = value["ranks"]
     if type(ranks) is not list:
         _raise_normalization_error(
@@ -224,7 +219,33 @@ def _decode_raw_charm(
             error=TypeError("ranks must be list"),
         )
 
-    return raw_id, game_id, randomized, ranks
+    return raw_id, game_id, is_random, ranks
+
+
+def _decode_random_flag(*, value: dict[object, object], path: str) -> bool:
+    has_random = "random" in value
+    has_randomized = "randomized" in value
+    if not has_random and not has_randomized:
+        _raise_normalization_error(
+            path=f"{path}.random",
+            error=ValueError(
+                "missing required key: random (legacy randomized is also accepted)"
+            ),
+        )
+    if has_random and has_randomized:
+        _raise_normalization_error(
+            path=f"{path}.randomized",
+            error=ValueError("random and randomized must not be specified together"),
+        )
+
+    key = "random" if has_random else "randomized"
+    is_random = value[key]
+    if type(is_random) is not bool:
+        _raise_normalization_error(
+            path=f"{path}.{key}",
+            error=TypeError(f"{key} must be bool"),
+        )
+    return is_random
 
 
 def _normalize_fixed_ranks(
