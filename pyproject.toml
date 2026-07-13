@@ -9,6 +9,7 @@ description = "Minimal package scaffold for Monster Hunter Wilds skill simulatio
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115,<1",
+    "ortools>=9.15,<10",
     "uvicorn>=0.51,<1",
 ]
 
