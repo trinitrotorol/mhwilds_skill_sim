@@ -20,6 +20,7 @@ from mhwilds_skill_sim.api.catalog_response import (
 from mhwilds_skill_sim.api.search_service import (
     search_catalog_build_candidates_from_payload,
     search_catalog_build_candidates_with_cp_sat_from_payload,
+    search_catalog_ranked_build_candidates_with_cp_sat_from_payload,
 )
 from mhwilds_skill_sim.catalog.loader import load_catalog
 from mhwilds_skill_sim.catalog.model import Catalog
@@ -82,6 +83,22 @@ def empty_catalog() -> Catalog:
 def valid_search_payload(max_results: int = 1) -> dict[str, object]:
     return {
         "requirements": [],
+        "max_results": max_results,
+    }
+
+
+def valid_ranked_search_payload(
+    max_results: int = 1,
+    *,
+    preferences: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "requirements": [],
+        "preferences": (
+            [{"skill_id": "skill:unknown", "target_level": 1}]
+            if preferences is None
+            else preferences
+        ),
         "max_results": max_results,
     }
 
@@ -630,6 +647,296 @@ def test_cp_sat_search_route_preserves_existing_route_contracts() -> None:
     assert "post" not in schema["paths"]["/catalog/metadata"]
     assert "post" in schema["paths"]["/search"]
     assert "get" not in schema["paths"]["/search"]
+
+
+@pytest.mark.parametrize(
+    "use_module_level_app",
+    [False, True],
+    ids=["factory-app", "module-level-app"],
+)
+def test_ranked_cp_sat_route_is_post_only_with_required_json_body(
+    use_module_level_app: bool,
+) -> None:
+    application = app if use_module_level_app else create_app()
+    route = route_for_path(application, "/search/cp-sat/ranked")
+    operation = application.openapi()["paths"]["/search/cp-sat/ranked"]
+
+    assert route.methods == {"POST"}
+    assert route.body_field is not None
+    assert "post" in operation
+    assert "get" not in operation
+    request_body = operation["post"]["requestBody"]
+    assert request_body["required"] is True
+    assert "application/json" in request_body["content"]
+
+
+@pytest.mark.parametrize(
+    "inject_catalog",
+    [False, True],
+    ids=["state-catalog", "injected-catalog"],
+)
+def test_ranked_cp_sat_endpoint_uses_exact_app_state_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    inject_catalog: bool,
+) -> None:
+    catalog = tiny_catalog()
+    payload = valid_ranked_search_payload()
+    expected: dict[str, object] = {
+        "candidates": [],
+        "exhausted": True,
+        "timed_out": False,
+    }
+    calls: list[tuple[Catalog, object]] = []
+
+    def fake_service(
+        *,
+        catalog: Catalog,
+        payload: object,
+    ) -> dict[str, object]:
+        calls.append((catalog, payload))
+        return expected
+
+    monkeypatch.setattr(
+        app_module,
+        "search_catalog_ranked_build_candidates_with_cp_sat_from_payload",
+        fake_service,
+    )
+    application = create_app(catalog=catalog) if inject_catalog else create_app()
+    if not inject_catalog:
+        application.state.catalog = catalog
+    route = route_for_path(application, "/search/cp-sat/ranked")
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+        payload=payload,
+    )
+
+    assert response is expected
+    assert calls == [(catalog, payload)]
+    assert calls[0][0] is catalog
+    assert calls[0][1] is payload
+    assert application.state.catalog is catalog
+
+
+@pytest.mark.parametrize(
+    "use_module_level_app",
+    [False, True],
+    ids=["factory-app", "module-level-app"],
+)
+@pytest.mark.parametrize(
+    "configure_invalid_catalog",
+    [False, True],
+    ids=["missing", "invalid"],
+)
+def test_ranked_cp_sat_catalog_errors_exactly_match_existing_routes(
+    monkeypatch: pytest.MonkeyPatch,
+    use_module_level_app: bool,
+    configure_invalid_catalog: bool,
+) -> None:
+    application = app if use_module_level_app else create_app()
+    assert not hasattr(application.state, "catalog")
+    if configure_invalid_catalog:
+        monkeypatch.setattr(
+            application.state,
+            "catalog",
+            "catalog",
+            raising=False,
+        )
+    ranked_route = route_for_path(application, "/search/cp-sat/ranked")
+    existing_route = route_for_path(application, "/search")
+
+    with pytest.raises(HTTPException) as ranked_exc_info:
+        call_route_endpoint(
+            ranked_route,
+            request=fake_request(application),
+            payload=valid_ranked_search_payload(),
+        )
+    with pytest.raises(HTTPException) as existing_exc_info:
+        call_route_endpoint(
+            existing_route,
+            request=fake_request(application),
+            payload=valid_search_payload(),
+        )
+
+    assert ranked_exc_info.value.status_code == 503
+    assert ranked_exc_info.value.detail == "catalog is not configured"
+    assert ranked_exc_info.value.status_code == existing_exc_info.value.status_code
+    assert ranked_exc_info.value.detail == existing_exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "preferences",
+    [
+        [{"skill_id": "skill:unknown", "target_level": 1}],
+        [],
+    ],
+    ids=["unknown-preference", "empty-preferences"],
+)
+def test_ranked_cp_sat_endpoint_returns_exact_serializable_candidate_shape(
+    preferences: list[dict[str, object]],
+) -> None:
+    catalog = tiny_catalog()
+    catalog_before = copy.deepcopy(catalog)
+    payload = valid_ranked_search_payload(preferences=preferences)
+    payload_before = copy.deepcopy(payload)
+    application = create_app(catalog=catalog)
+    route = route_for_path(application, "/search/cp-sat/ranked")
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+        payload=payload,
+    )
+
+    assert isinstance(response, dict)
+    assert list(response) == ["candidates", "exhausted", "timed_out"]
+    assert "total_count" not in response
+    assert "truncated" not in response
+    candidates = response["candidates"]
+    assert isinstance(candidates, list)
+    assert len(candidates) == 1
+    assert list(candidates[0]) == [
+        "equipment",
+        "placements",
+        "skill_levels",
+        "preference_score",
+    ]
+    assert candidates[0]["preference_score"] == 0
+    assert response == (
+        search_catalog_ranked_build_candidates_with_cp_sat_from_payload(
+            catalog=catalog,
+            payload=payload,
+        )
+    )
+    json.dumps(response)
+    assert application.state.catalog is catalog
+    assert catalog == catalog_before
+    assert payload == payload_before
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        ({"requirements": [], "max_results": 1}, ValueError),
+        (
+            {
+                "requirements": [],
+                "preferences": "not-a-list",
+                "max_results": 1,
+            },
+            TypeError,
+        ),
+        (
+            {
+                "requirements": [],
+                "preferences": [{"skill_id": "skill:test", "target_level": 0}],
+                "max_results": 1,
+            },
+            ValueError,
+        ),
+    ],
+)
+def test_ranked_cp_sat_endpoint_propagates_payload_validation_errors(
+    payload: object,
+    expected_error: type[Exception],
+) -> None:
+    application = create_app(catalog=empty_catalog())
+    route = route_for_path(application, "/search/cp-sat/ranked")
+
+    with pytest.raises(expected_error):
+        call_route_endpoint(
+            route,
+            request=fake_request(application),
+            payload=payload,
+        )
+
+
+def test_ranked_cp_sat_endpoint_propagates_objective_overflow() -> None:
+    application = create_app(catalog=tiny_catalog())
+    route = route_for_path(application, "/search/cp-sat/ranked")
+    payload = valid_ranked_search_payload(
+        preferences=[{"skill_id": "skill:huge", "target_level": 10**100}],
+    )
+
+    with pytest.raises(ValueError, match="preferences|objective"):
+        call_route_endpoint(
+            route,
+            request=fake_request(application),
+            payload=payload,
+        )
+
+
+@pytest.mark.parametrize("path", ["/search", "/search/cp-sat"])
+def test_existing_search_endpoints_still_reject_preferences(path: str) -> None:
+    application = create_app(catalog=empty_catalog())
+    route = route_for_path(application, path)
+    payload = valid_search_payload()
+    payload["preferences"] = []
+
+    with pytest.raises(ValueError, match="unexpected keys.*preferences"):
+        call_route_endpoint(
+            route,
+            request=fake_request(application),
+            payload=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_keys"),
+    [
+        ("/search", ["candidates", "total_count", "truncated"]),
+        ("/search/cp-sat", ["candidates", "exhausted", "timed_out"]),
+    ],
+)
+def test_existing_search_response_shapes_do_not_gain_preference_score(
+    path: str,
+    expected_keys: list[str],
+) -> None:
+    application = create_app(catalog=tiny_catalog())
+    route = route_for_path(application, path)
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+        payload=valid_search_payload(),
+    )
+
+    assert list(response) == expected_keys  # type: ignore[arg-type]
+    candidates = response["candidates"]  # type: ignore[index]
+    assert isinstance(candidates, list)
+    assert len(candidates) == 1
+    assert list(candidates[0]) == ["equipment", "placements", "skill_levels"]
+    assert "preference_score" not in candidates[0]
+
+
+def test_ranked_route_does_not_change_health_or_metadata() -> None:
+    catalog = empty_catalog()
+    application = create_app(catalog=catalog)
+
+    assert call_route_endpoint(route_for_path(application, "/health")) == {
+        "status": "ok"
+    }
+    assert call_route_endpoint(
+        route_for_path(application, "/catalog/metadata"),
+        request=fake_request(application),
+    ) == build_catalog_metadata_response(catalog=catalog)
+
+
+def test_ranked_endpoint_source_stays_a_thin_boundary() -> None:
+    route = route_for_path(create_app(), "/search/cp-sat/ranked")
+    source = inspect.getsource(route.endpoint).lower()
+
+    for forbidden in (
+        "load_catalog",
+        "synchroniz",
+        "solver",
+        "pathlib",
+        "read_text",
+        "read_bytes",
+        "open(",
+    ):
+        assert forbidden not in source
 
 
 def test_create_app_state_is_isolated_between_instances() -> None:
