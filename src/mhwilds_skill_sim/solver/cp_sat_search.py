@@ -15,7 +15,7 @@ from mhwilds_skill_sim.domain.equipment import (
     EquipmentPart,
     WeaponKind,
 )
-from mhwilds_skill_sim.domain.skill import SkillKind
+from mhwilds_skill_sim.domain.skill import SkillDefinition, SkillKind
 from mhwilds_skill_sim.domain.slot import DecorationKind, DecorationSlot
 from mhwilds_skill_sim.solver.appraisal_charms import (
     generate_appraisal_charm_equipment_candidates,
@@ -26,6 +26,10 @@ from mhwilds_skill_sim.solver.equipment_filtering import (
 )
 from mhwilds_skill_sim.solver.equipment_variants import (
     expand_equipment_bonus_skill_variants,
+)
+from mhwilds_skill_sim.solver.preferences import (
+    SkillPreference,
+    calculate_skill_preference_score,
 )
 from mhwilds_skill_sim.solver.requirements import (
     SkillRequirement,
@@ -39,6 +43,7 @@ _EquipmentVariables = dict[
     EquipmentPart,
     tuple[tuple[EquipmentDefinition, cp_model.IntVar], ...],
 ]
+_CP_SAT_SAFE_INTEGER_MAX = cp_model.INT_MAX // 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +225,145 @@ def search_catalog_build_candidates_with_cp_sat(
         )
 
 
+def search_catalog_ranked_build_candidates_with_cp_sat(
+    *,
+    catalog: Catalog,
+    requirements: tuple[SkillRequirement, ...],
+    preferences: tuple[SkillPreference, ...],
+    max_results: int,
+    weapon_kind: WeaponKind | None = None,
+    timeout_seconds: float = 10.0,
+) -> CpSatBuildSearchResult:
+    """Find distinct Catalog builds ordered by preferred skill score."""
+
+    _validate_preferences(preferences=preferences)
+    if not preferences:
+        return search_catalog_build_candidates_with_cp_sat(
+            catalog=catalog,
+            requirements=requirements,
+            max_results=max_results,
+            weapon_kind=weapon_kind,
+            timeout_seconds=timeout_seconds,
+        )
+
+    _validate_inputs(
+        catalog=catalog,
+        requirements=requirements,
+        weapon_kind=weapon_kind,
+        timeout_seconds=timeout_seconds,
+    )
+    _validate_max_results(value=max_results)
+    deadline = monotonic() + timeout_seconds
+
+    candidates_by_part = _prepare_candidates_by_part(
+        catalog=catalog,
+        weapon_kind=weapon_kind,
+    )
+    decoration_limit = _calculate_decoration_limit(
+        candidates_by_part=candidates_by_part,
+    )
+    _validate_preference_objective_range(
+        preferences=preferences,
+        decoration_limit=decoration_limit,
+    )
+    if any(not candidates_by_part[part] for part in EquipmentPart):
+        return CpSatBuildSearchResult(
+            candidates=(),
+            exhausted=True,
+            timed_out=False,
+        )
+
+    (
+        model,
+        equipment_variables,
+        decoration_variables,
+        preference_score_variables,
+    ) = _create_ranked_model(
+        catalog=catalog,
+        requirements=requirements,
+        preferences=preferences,
+        candidates_by_part=candidates_by_part,
+        decoration_limit=decoration_limit,
+    )
+    candidates: list[BuildCandidate] = []
+
+    while True:
+        remaining_seconds = deadline - monotonic()
+        if remaining_seconds <= 0:
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=False,
+                timed_out=True,
+            )
+
+        solver, status = _solve_model(
+            model=model,
+            timeout_seconds=remaining_seconds,
+        )
+
+        if status == cp_model.INFEASIBLE:
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=True,
+                timed_out=False,
+            )
+        if status == cp_model.UNKNOWN:
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=False,
+                timed_out=True,
+            )
+        if status == cp_model.MODEL_INVALID:
+            raise RuntimeError("CP-SAT model is invalid")
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            raise RuntimeError(f"unexpected CP-SAT solver status: {status}")
+
+        if status == cp_model.FEASIBLE:
+            if len(candidates) < max_results:
+                candidates.append(
+                    _reconstruct_ranked_candidate(
+                        solver=solver,
+                        catalog=catalog,
+                        requirements=requirements,
+                        preferences=preferences,
+                        equipment_variables=equipment_variables,
+                        decoration_variables=decoration_variables,
+                        preference_score_variables=preference_score_variables,
+                    )
+                )
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=False,
+                timed_out=True,
+            )
+
+        if len(candidates) >= max_results:
+            return CpSatBuildSearchResult(
+                candidates=tuple(candidates),
+                exhausted=False,
+                timed_out=False,
+            )
+
+        candidates.append(
+            _reconstruct_ranked_candidate(
+                solver=solver,
+                catalog=catalog,
+                requirements=requirements,
+                preferences=preferences,
+                equipment_variables=equipment_variables,
+                decoration_variables=decoration_variables,
+                preference_score_variables=preference_score_variables,
+            )
+        )
+        selected_variables = _reconstruct_selected_equipment_variables(
+            solver=solver,
+            equipment_variables=equipment_variables,
+        )
+        model.add(
+            sum(selected_variables, 0) <= len(selected_variables) - 1,
+        )
+
+
 def _prepare_candidates_by_part(
     *,
     catalog: Catalog,
@@ -286,41 +430,57 @@ def _validate_max_results(*, value: object) -> None:
         raise ValueError("max_results must be at least zero")
 
 
+def _validate_preferences(*, preferences: object) -> None:
+    if type(preferences) is not tuple:
+        raise TypeError("preferences must be tuple")
+
+    seen_skill_ids: set[str] = set()
+    for preference in preferences:
+        if not isinstance(preference, SkillPreference):
+            raise TypeError("preferences must contain only SkillPreference")
+        if preference.skill_id in seen_skill_ids:
+            raise ValueError("preferences must not contain duplicate skill_id")
+        seen_skill_ids.add(preference.skill_id)
+
+
+def _calculate_decoration_limit(
+    *,
+    candidates_by_part: dict[EquipmentPart, tuple[EquipmentDefinition, ...]],
+) -> int:
+    return sum(
+        max(
+            (len(equipment.slots) for equipment in candidates_by_part[part]),
+            default=0,
+        )
+        for part in EquipmentPart
+    )
+
+
+def _validate_preference_objective_range(
+    *,
+    preferences: tuple[SkillPreference, ...],
+    decoration_limit: int,
+) -> None:
+    maximum_preference_score = sum(
+        preference.target_level for preference in preferences
+    )
+    multiplier = decoration_limit + 1
+    maximum_combined_objective = maximum_preference_score * multiplier
+    if maximum_combined_objective > _CP_SAT_SAFE_INTEGER_MAX:
+        raise ValueError(
+            "preferences objective exceeds the safe CP-SAT integer range",
+        )
+
+
 def _create_model(
     *,
     catalog: Catalog,
     requirements: tuple[SkillRequirement, ...],
     candidates_by_part: dict[EquipmentPart, tuple[EquipmentDefinition, ...]],
 ) -> tuple[cp_model.CpModel, _EquipmentVariables, tuple[cp_model.IntVar, ...]]:
-    model = cp_model.CpModel()
-
-    equipment_variables: _EquipmentVariables = {}
-    ordered_equipment_variables: list[cp_model.IntVar] = []
-    for part_index, part in enumerate(EquipmentPart):
-        choices: list[tuple[EquipmentDefinition, cp_model.IntVar]] = []
-        for candidate_index, equipment in enumerate(candidates_by_part[part]):
-            variable = model.new_bool_var(
-                f"equipment_{part_index}_{candidate_index}",
-            )
-            choices.append((equipment, variable))
-            ordered_equipment_variables.append(variable)
-        equipment_variables[part] = tuple(choices)
-        model.add_exactly_one(variable for _, variable in choices)
-
-    maximum_slot_count = sum(
-        max(len(equipment.slots) for equipment in candidates_by_part[part])
-        for part in EquipmentPart
-    )
-    decoration_variables = tuple(
-        model.new_int_var(0, maximum_slot_count, f"decoration_{index}")
-        for index, _ in enumerate(catalog.decorations)
-    )
-
-    _add_slot_capacity_constraints(
-        model=model,
-        equipment_variables=equipment_variables,
-        decorations=catalog.decorations,
-        decoration_variables=decoration_variables,
+    model, equipment_variables, decoration_variables = _create_model_components(
+        catalog=catalog,
+        candidates_by_part=candidates_by_part,
     )
     _add_skill_requirement_constraints(
         model=model,
@@ -332,6 +492,112 @@ def _create_model(
     )
 
     model.minimize(sum(decoration_variables, 0))
+    _add_decision_strategies(
+        model=model,
+        equipment_variables=equipment_variables,
+        decoration_variables=decoration_variables,
+    )
+
+    return model, equipment_variables, decoration_variables
+
+
+def _create_ranked_model(
+    *,
+    catalog: Catalog,
+    requirements: tuple[SkillRequirement, ...],
+    preferences: tuple[SkillPreference, ...],
+    candidates_by_part: dict[EquipmentPart, tuple[EquipmentDefinition, ...]],
+    decoration_limit: int,
+) -> tuple[
+    cp_model.CpModel,
+    _EquipmentVariables,
+    tuple[cp_model.IntVar, ...],
+    tuple[cp_model.IntVar, ...],
+]:
+    model, equipment_variables, decoration_variables = _create_model_components(
+        catalog=catalog,
+        candidates_by_part=candidates_by_part,
+    )
+    _add_skill_requirement_constraints(
+        model=model,
+        equipment_variables=equipment_variables,
+        decorations=catalog.decorations,
+        decoration_variables=decoration_variables,
+        catalog=catalog,
+        requirements=requirements,
+    )
+    preference_score_variables = _add_skill_preference_score_variables(
+        model=model,
+        equipment_variables=equipment_variables,
+        decorations=catalog.decorations,
+        decoration_variables=decoration_variables,
+        catalog=catalog,
+        preferences=preferences,
+    )
+
+    multiplier = decoration_limit + 1
+    model.maximize(
+        sum(preference_score_variables, 0) * multiplier - sum(decoration_variables, 0),
+    )
+    _add_decision_strategies(
+        model=model,
+        equipment_variables=equipment_variables,
+        decoration_variables=decoration_variables,
+    )
+
+    return (
+        model,
+        equipment_variables,
+        decoration_variables,
+        preference_score_variables,
+    )
+
+
+def _create_model_components(
+    *,
+    catalog: Catalog,
+    candidates_by_part: dict[EquipmentPart, tuple[EquipmentDefinition, ...]],
+) -> tuple[cp_model.CpModel, _EquipmentVariables, tuple[cp_model.IntVar, ...]]:
+    model = cp_model.CpModel()
+
+    equipment_variables: _EquipmentVariables = {}
+    for part_index, part in enumerate(EquipmentPart):
+        choices: list[tuple[EquipmentDefinition, cp_model.IntVar]] = []
+        for candidate_index, equipment in enumerate(candidates_by_part[part]):
+            variable = model.new_bool_var(
+                f"equipment_{part_index}_{candidate_index}",
+            )
+            choices.append((equipment, variable))
+        equipment_variables[part] = tuple(choices)
+        model.add_exactly_one(variable for _, variable in choices)
+
+    decoration_limit = _calculate_decoration_limit(
+        candidates_by_part=candidates_by_part,
+    )
+    decoration_variables = tuple(
+        model.new_int_var(0, decoration_limit, f"decoration_{index}")
+        for index, _ in enumerate(catalog.decorations)
+    )
+
+    _add_slot_capacity_constraints(
+        model=model,
+        equipment_variables=equipment_variables,
+        decorations=catalog.decorations,
+        decoration_variables=decoration_variables,
+    )
+
+    return model, equipment_variables, decoration_variables
+
+
+def _add_decision_strategies(
+    *,
+    model: cp_model.CpModel,
+    equipment_variables: _EquipmentVariables,
+    decoration_variables: tuple[cp_model.IntVar, ...],
+) -> None:
+    ordered_equipment_variables = [
+        variable for part in EquipmentPart for _, variable in equipment_variables[part]
+    ]
     model.add_decision_strategy(
         ordered_equipment_variables,
         cp_model.CHOOSE_FIRST,
@@ -343,8 +609,6 @@ def _create_model(
             cp_model.CHOOSE_FIRST,
             cp_model.SELECT_MIN_VALUE,
         )
-
-    return model, equipment_variables, decoration_variables
 
 
 def _add_slot_capacity_constraints(
@@ -403,64 +667,116 @@ def _add_skill_requirement_constraints(
     skills_by_id = {skill.skill_id: skill for skill in catalog.skills}
 
     for requirement_index, requirement in enumerate(requirements):
-        total_terms = []
-        for choices in equipment_variables.values():
-            for equipment, variable in choices:
-                contribution = sum(
-                    skill.level
-                    for skill in equipment.skills
-                    if skill.skill_id == requirement.skill_id
-                )
-                if contribution:
-                    total_terms.append(contribution * variable)
+        skill_level = _create_skill_level_expression(
+            model=model,
+            equipment_variables=equipment_variables,
+            decorations=decorations,
+            decoration_variables=decoration_variables,
+            skill_id=requirement.skill_id,
+            skill_definition=skills_by_id.get(requirement.skill_id),
+            variable_name_prefix=f"requirement_{requirement_index}",
+        )
+        model.add(skill_level >= requirement.min_level)
 
-        for decoration, variable in zip(decorations, decoration_variables):
+
+def _add_skill_preference_score_variables(
+    *,
+    model: cp_model.CpModel,
+    equipment_variables: _EquipmentVariables,
+    decorations: tuple[DecorationDefinition, ...],
+    decoration_variables: tuple[cp_model.IntVar, ...],
+    catalog: Catalog,
+    preferences: tuple[SkillPreference, ...],
+) -> tuple[cp_model.IntVar, ...]:
+    skills_by_id = {skill.skill_id: skill for skill in catalog.skills}
+    score_variables: list[cp_model.IntVar] = []
+    for preference_index, preference in enumerate(preferences):
+        skill_level = _create_skill_level_expression(
+            model=model,
+            equipment_variables=equipment_variables,
+            decorations=decorations,
+            decoration_variables=decoration_variables,
+            skill_id=preference.skill_id,
+            skill_definition=skills_by_id.get(preference.skill_id),
+            variable_name_prefix=f"preference_{preference_index}",
+        )
+        score_variable = model.new_int_var(
+            0,
+            preference.target_level,
+            f"preference_{preference_index}_score",
+        )
+        model.add_min_equality(
+            score_variable,
+            [skill_level, preference.target_level],
+        )
+        score_variables.append(score_variable)
+
+    return tuple(score_variables)
+
+
+def _create_skill_level_expression(
+    *,
+    model: cp_model.CpModel,
+    equipment_variables: _EquipmentVariables,
+    decorations: tuple[DecorationDefinition, ...],
+    decoration_variables: tuple[cp_model.IntVar, ...],
+    skill_id: str,
+    skill_definition: SkillDefinition | None,
+    variable_name_prefix: str,
+) -> cp_model.LinearExpr | int:
+    total_terms = []
+    for choices in equipment_variables.values():
+        for equipment, variable in choices:
             contribution = sum(
-                skill.level
-                for skill in decoration.skills
-                if skill.skill_id == requirement.skill_id
+                skill.level for skill in equipment.skills if skill.skill_id == skill_id
             )
             if contribution:
                 total_terms.append(contribution * variable)
 
-        skill_definition = skills_by_id.get(requirement.skill_id)
-        if skill_definition is not None and skill_definition.kind in (
-            SkillKind.SERIES,
-            SkillKind.GROUP,
-        ):
-            if skill_definition.kind is SkillKind.SERIES:
-                selected_piece_terms = [
-                    variable
-                    for choices in equipment_variables.values()
-                    for equipment, variable in choices
-                    if requirement.skill_id in equipment.series_skill_ids
-                ]
-            else:
-                selected_piece_terms = [
-                    variable
-                    for choices in equipment_variables.values()
-                    for equipment, variable in choices
-                    if requirement.skill_id in equipment.group_skill_ids
-                ]
+    for decoration, variable in zip(decorations, decoration_variables):
+        contribution = sum(
+            skill.level for skill in decoration.skills if skill.skill_id == skill_id
+        )
+        if contribution:
+            total_terms.append(contribution * variable)
 
-            selected_piece_count = sum(selected_piece_terms, 0)
-            for rank_index, rank in enumerate(skill_definition.ranks):
-                required_pieces = rank.required_pieces
-                if required_pieces is None:
-                    raise RuntimeError("bonus skill rank must require pieces")
+    if skill_definition is not None and skill_definition.kind in (
+        SkillKind.SERIES,
+        SkillKind.GROUP,
+    ):
+        if skill_definition.kind is SkillKind.SERIES:
+            selected_piece_terms = [
+                variable
+                for choices in equipment_variables.values()
+                for equipment, variable in choices
+                if skill_id in equipment.series_skill_ids
+            ]
+        else:
+            selected_piece_terms = [
+                variable
+                for choices in equipment_variables.values()
+                for equipment, variable in choices
+                if skill_id in equipment.group_skill_ids
+            ]
 
-                active_rank = model.new_bool_var(
-                    f"requirement_{requirement_index}_rank_{rank_index}",
-                )
-                model.add(
-                    selected_piece_count >= required_pieces,
-                ).only_enforce_if(active_rank)
-                model.add(
-                    selected_piece_count <= required_pieces - 1,
-                ).only_enforce_if(active_rank.Not())
-                total_terms.append(active_rank)
+        selected_piece_count = sum(selected_piece_terms, 0)
+        for rank_index, rank in enumerate(skill_definition.ranks):
+            required_pieces = rank.required_pieces
+            if required_pieces is None:
+                raise RuntimeError("bonus skill rank must require pieces")
 
-        model.add(sum(total_terms, 0) >= requirement.min_level)
+            active_rank = model.new_bool_var(
+                f"{variable_name_prefix}_rank_{rank_index}",
+            )
+            model.add(
+                selected_piece_count >= required_pieces,
+            ).only_enforce_if(active_rank)
+            model.add(
+                selected_piece_count <= required_pieces - 1,
+            ).only_enforce_if(active_rank.Not())
+            total_terms.append(active_rank)
+
+    return sum(total_terms, 0)
 
 
 def _solve_model(
@@ -574,6 +890,36 @@ def _reconstruct_limited_candidate(
         )
     except (TypeError, ValueError) as error:
         raise RuntimeError("failed to reconstruct a valid CP-SAT build") from error
+
+
+def _reconstruct_ranked_candidate(
+    *,
+    solver: cp_model.CpSolver,
+    catalog: Catalog,
+    requirements: tuple[SkillRequirement, ...],
+    preferences: tuple[SkillPreference, ...],
+    equipment_variables: _EquipmentVariables,
+    decoration_variables: tuple[cp_model.IntVar, ...],
+    preference_score_variables: tuple[cp_model.IntVar, ...],
+) -> BuildCandidate:
+    candidate = _reconstruct_limited_candidate(
+        solver=solver,
+        catalog=catalog,
+        requirements=requirements,
+        equipment_variables=equipment_variables,
+        decoration_variables=decoration_variables,
+    )
+    reconstructed_score = calculate_skill_preference_score(
+        skill_levels=dict(candidate.skill_levels),
+        preferences=preferences,
+    )
+    model_score = sum(solver.value(variable) for variable in preference_score_variables)
+    if reconstructed_score != model_score:
+        raise RuntimeError(
+            "reconstructed CP-SAT build preference score does not match the model",
+        )
+
+    return candidate
 
 
 def _reconstruct_placements(
