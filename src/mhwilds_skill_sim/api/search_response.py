@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mhwilds_skill_sim.solver.build import BuildCandidate
+from mhwilds_skill_sim.solver.cp_sat_search import CpSatBuildSearchResult
 from mhwilds_skill_sim.solver.search_result import BuildCandidateSearchResult
 
 
@@ -75,4 +76,21 @@ def build_candidate_search_result_to_response(
         ],
         "total_count": result.total_count,
         "truncated": result.truncated,
+    }
+
+
+def build_cp_sat_search_result_to_response(
+    *,
+    result: CpSatBuildSearchResult,
+) -> dict[str, object]:
+    if not isinstance(result, CpSatBuildSearchResult):
+        raise TypeError("result must be CpSatBuildSearchResult")
+
+    return {
+        "candidates": [
+            build_candidate_to_response(candidate=candidate)
+            for candidate in result.candidates
+        ],
+        "exhausted": result.exhausted,
+        "timed_out": result.timed_out,
     }

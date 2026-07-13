@@ -19,6 +19,7 @@ from mhwilds_skill_sim.api.catalog_response import (
 )
 from mhwilds_skill_sim.api.search_service import (
     search_catalog_build_candidates_from_payload,
+    search_catalog_build_candidates_with_cp_sat_from_payload,
 )
 from mhwilds_skill_sim.catalog.loader import load_catalog
 from mhwilds_skill_sim.catalog.model import Catalog
@@ -72,6 +73,10 @@ def fake_request(application: FastAPI) -> SimpleNamespace:
 
 def tiny_catalog() -> Catalog:
     return load_catalog(path=FIXTURE_PATH)
+
+
+def empty_catalog() -> Catalog:
+    return Catalog(schema_version=1, equipment=(), decorations=())
 
 
 def valid_search_payload(max_results: int = 1) -> dict[str, object]:
@@ -446,6 +451,185 @@ def test_search_endpoint_propagates_payload_validation_errors(
             request=fake_request(application),
             payload=payload,
         )
+
+
+def test_cp_sat_search_route_is_post_only_with_required_openapi_body() -> None:
+    application = create_app()
+    route = route_for_path(application, "/search/cp-sat")
+    operation = application.openapi()["paths"]["/search/cp-sat"]
+
+    assert route.methods == {"POST"}
+    assert route.body_field is not None
+    assert "post" in operation
+    assert "get" not in operation
+    request_body = operation["post"]["requestBody"]
+    assert request_body["required"] is True
+    assert "application/json" in request_body["content"]
+
+
+def test_cp_sat_search_endpoint_returns_serializable_response_from_state_catalog() -> (
+    None
+):
+    application = create_app()
+    catalog = empty_catalog()
+    payload = valid_search_payload()
+    catalog_before = copy.deepcopy(catalog)
+    payload_before = copy.deepcopy(payload)
+    application.state.catalog = catalog
+    route = route_for_path(application, "/search/cp-sat")
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+        payload=payload,
+    )
+
+    assert isinstance(response, dict)
+    assert list(response) == ["candidates", "exhausted", "timed_out"]
+    assert response == {
+        "candidates": [],
+        "exhausted": True,
+        "timed_out": False,
+    }
+    assert "total_count" not in response
+    assert "truncated" not in response
+    json.dumps(response)
+    assert response == search_catalog_build_candidates_with_cp_sat_from_payload(
+        catalog=catalog,
+        payload=payload,
+    )
+    assert catalog == catalog_before
+    assert payload == payload_before
+
+
+def test_cp_sat_search_endpoint_uses_injected_catalog() -> None:
+    catalog = empty_catalog()
+    payload = valid_search_payload()
+    application = create_app(catalog=catalog)
+    route = route_for_path(application, "/search/cp-sat")
+
+    response = call_route_endpoint(
+        route,
+        request=fake_request(application),
+        payload=payload,
+    )
+
+    assert application.state.catalog is catalog
+    assert response == search_catalog_build_candidates_with_cp_sat_from_payload(
+        catalog=catalog,
+        payload=payload,
+    )
+
+
+@pytest.mark.parametrize(
+    "use_module_level_app",
+    [False, True],
+    ids=["factory-app", "module-level-app"],
+)
+@pytest.mark.parametrize(
+    "configure_invalid_catalog",
+    [False, True],
+    ids=["missing", "invalid"],
+)
+def test_cp_sat_search_catalog_errors_exactly_match_existing_search(
+    monkeypatch: pytest.MonkeyPatch,
+    use_module_level_app: bool,
+    configure_invalid_catalog: bool,
+) -> None:
+    application = app if use_module_level_app else create_app()
+    assert not hasattr(application.state, "catalog")
+    if configure_invalid_catalog:
+        monkeypatch.setattr(
+            application.state,
+            "catalog",
+            "catalog",
+            raising=False,
+        )
+
+    cp_sat_route = route_for_path(application, "/search/cp-sat")
+    search_route = route_for_path(application, "/search")
+
+    with pytest.raises(HTTPException) as cp_sat_exc_info:
+        call_route_endpoint(
+            cp_sat_route,
+            request=fake_request(application),
+            payload=valid_search_payload(),
+        )
+    with pytest.raises(HTTPException) as search_exc_info:
+        call_route_endpoint(
+            search_route,
+            request=fake_request(application),
+            payload=valid_search_payload(),
+        )
+
+    assert cp_sat_exc_info.value.status_code == 503
+    assert cp_sat_exc_info.value.detail == "catalog is not configured"
+    assert cp_sat_exc_info.value.status_code == search_exc_info.value.status_code
+    assert cp_sat_exc_info.value.detail == search_exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        ([], TypeError),
+        (
+            {
+                "requirements": [
+                    {"skill_id": "skill:attack-boost", "min_level": 1},
+                    {"skill_id": "skill:attack-boost", "min_level": 2},
+                ],
+                "max_results": 1,
+            },
+            ValueError,
+        ),
+        ({"requirements": [], "max_results": "1"}, TypeError),
+    ],
+)
+def test_cp_sat_search_endpoint_propagates_payload_validation_errors(
+    payload: object,
+    expected_error: type[Exception],
+) -> None:
+    application = create_app(catalog=empty_catalog())
+    route = route_for_path(application, "/search/cp-sat")
+
+    with pytest.raises(expected_error):
+        call_route_endpoint(
+            route,
+            request=fake_request(application),
+            payload=payload,
+        )
+
+
+def test_cp_sat_search_route_preserves_existing_route_contracts() -> None:
+    catalog = empty_catalog()
+    application = create_app(catalog=catalog)
+    schema = application.openapi()
+
+    health_response = call_route_endpoint(route_for_path(application, "/health"))
+    metadata_response = call_route_endpoint(
+        route_for_path(application, "/catalog/metadata"),
+        request=fake_request(application),
+    )
+    search_response = call_route_endpoint(
+        route_for_path(application, "/search"),
+        request=fake_request(application),
+        payload=valid_search_payload(),
+    )
+
+    assert health_response == {"status": "ok"}
+    assert metadata_response == build_catalog_metadata_response(catalog=catalog)
+    assert search_response == {
+        "candidates": [],
+        "total_count": 0,
+        "truncated": False,
+    }
+    assert list(search_response) == ["candidates", "total_count", "truncated"]
+    assert "get" in schema["paths"]["/health"]
+    assert "post" not in schema["paths"]["/health"]
+    assert "get" in schema["paths"]["/catalog/metadata"]
+    assert "post" not in schema["paths"]["/catalog/metadata"]
+    assert "post" in schema["paths"]["/search"]
+    assert "get" not in schema["paths"]["/search"]
 
 
 def test_create_app_state_is_isolated_between_instances() -> None:

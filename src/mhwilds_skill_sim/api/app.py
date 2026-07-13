@@ -9,6 +9,7 @@ from mhwilds_skill_sim.api.catalog_response import (
 )
 from mhwilds_skill_sim.api.search_service import (
     search_catalog_build_candidates_from_payload,
+    search_catalog_build_candidates_with_cp_sat_from_payload,
 )
 from mhwilds_skill_sim.catalog.model import Catalog
 
@@ -51,6 +52,17 @@ def create_app(
     ) -> dict[str, object]:
         catalog = _catalog_from_request(request=request)
         return search_catalog_build_candidates_from_payload(
+            catalog=catalog,
+            payload=payload,
+        )
+
+    @api_app.post("/search/cp-sat")
+    def search_cp_sat(
+        request: Request,
+        payload: object = Body(...),
+    ) -> dict[str, object]:
+        catalog = _catalog_from_request(request=request)
+        return search_catalog_build_candidates_with_cp_sat_from_payload(
             catalog=catalog,
             payload=payload,
         )
