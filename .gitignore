@@ -7,3 +7,7 @@ __pycache__/
 build/
 dist/
 .wrangler/
+node_modules/
+coverage/
+.vite/
+*.tsbuildinfo

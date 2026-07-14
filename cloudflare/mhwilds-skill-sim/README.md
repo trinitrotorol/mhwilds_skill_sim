@@ -2,7 +2,16 @@
 
 ## 目的
 
-これはReact UIではありません。Cloudflare GitHub buildを通すための最小placeholder Workerです。Cloudflareのautomatic static directory detectionには依存せず、Worker entrypointはrepository rootの`wrangler.jsonc`で明示されています。
+Worker `mhwilds-skill-sim`は、React/Viteのbuild outputをCloudflare Static Assetsから配信し、同一originの限定API pathだけを将来のFastAPI backendへ中継します。placeholder HTMLやSPA fallbackは使用しません。
+
+配信pathは次の2種類です。
+
+```text
+/game-guide/mhwilds-skill-sim/
+/game-guide/mhwilds-skill-sim/assets/*
+```
+
+slashなしのapplication pathはslash付きへ308 redirectします。root、既存guide、unknown child pathはこのWorkerでは処理せず404にします。
 
 ## ローカル検証
 
@@ -11,11 +20,18 @@ node --test cloudflare/mhwilds-skill-sim/src/index.test.mjs
 npx --yes wrangler@4.110.0 deploy --dry-run --config wrangler.jsonc --outdir .wrangler/dry-run
 ```
 
-Wranglerのdry-runはbundleを検証しますが、Cloudflareへdeployしません。
+Wranglerのdry-runはcustom build、Static Assets、Worker bundleを検証しますが、Cloudflareへdeployしません。custom buildは各`wrangler deploy`で次を実行します。
+
+```text
+npm --prefix apps/web ci --no-audit --no-fund
+npm --prefix apps/web run build
+```
+
+毎回lockfileからdeterministicなinstallを行い、その直後に新しいStatic Assetsを生成するため、Dashboard側に別のBuild commandは設定しません。
 
 ## Cloudflare Builds設定
 
-Cloudflare DashboardのWorker `mhwilds-skill-sim-web` で次を設定します。
+Cloudflare DashboardのWorker `mhwilds-skill-sim` で次を設定します。
 
 ```text
 Git repository: trinitrotorol/mhwilds_skill_sim
@@ -25,56 +41,49 @@ Build command: 空欄
 Deploy command: npx wrangler@4.110.0 deploy
 ```
 
-既存のGitHub connectionを作り直す必要はありません。設定を保存したら、最新の`master`のdeploymentをRetryします。
+既存のGitHub connectionやCustom Routeを変更する必要はありません。
 
-## workers.dev smoke test
+## API proxy
 
-build成功後、Cloudflare Dashboardが示すworkers.dev hostnameで次のpathを開きます。
-
-```text
-/game-guide/mhwilds-skill-sim/
-```
-
-root `/` ではなく上記pathを確認し、次が表示されることを確認します。
+公開するAPI mappingは次の3件だけです。query stringとmethodを維持し、CookieとAuthorizationはbackendへ転送しません。
 
 ```text
-MHWILDS スキルシミュレータ
-現在準備中です。
+GET  /game-guide/mhwilds-skill-sim/api/health
+GET  /game-guide/mhwilds-skill-sim/api/catalog/metadata
+POST /game-guide/mhwilds-skill-sim/api/search/cp-sat/ranked
 ```
 
-## Custom Routeはbuild成功後に追加
+現在の本番環境では`API_ORIGIN`は未設定です。その間、APIは503と`search API is not configured`を返し、React UIは「検索APIを準備しています」とretry buttonを表示します。
 
-このTaskの`wrangler.jsonc`はrouteを管理しません。build成功後、Cloudflare Dashboardで次のCustom Routeを追加します。
+将来backendを用意した後、`API_ORIGIN`をCloudflareのWorker環境変数として設定します。値はpath、query、fragment、credentialsを含まない別originのabsolute HTTPS originに限定し、repositoryや`wrangler.jsonc`へ値をcommitしません。route/domain設定の変更は不要です。
 
-Zone:
+## Public URL
 
-```text
-trinitrotorol.com
-```
-
-Routes:
-
-```text
-trinitrotorol.com/game-guide/mhwilds-skill-sim
-trinitrotorol.com/game-guide/mhwilds-skill-sim/*
-```
-
-次のURLを確認します。
+deploy後、両方のURLでReact画面を確認します。
 
 ```text
 https://trinitrotorol.com/game-guide/mhwilds-skill-sim/
+https://mhwilds-skill-sim.trinitrotorol.workers.dev/game-guide/mhwilds-skill-sim/
 ```
 
-既存URLも必ず確認します。
+slashなしURLがqueryを維持して308になること、HTMLとgenerated JS/CSSが200になること、API未設定の503をUIが準備中状態として扱うことも確認します。
+
+## Actual browser smoke
+
+custom-domain pageを実際のbrowserで開き、desktop相当`1440 x 900`とmobile相当`390 x 844`の両方で次を確認します。
+
+```text
+- React画面がrenderされる
+- header、「検索APIを準備しています」、retry buttonが表示される
+- layout崩れ、horizontal overflow、JS/CSS load failureがない
+- keyboard focusを操作できる
+- consoleにuncaught errorがない
+- networkで限定APIが意図した503 JSONを返す
+- 古いplaceholderだけの表示ではない
+```
+
+最後に既存guideが引き続き有効であることを確認します。
 
 ```text
 https://trinitrotorol.com/game-guide/exponential-idle-minigame-guide
 ```
-
-このTaskではDashboard routeの作成成功をrepository testで偽装しません。
-
-## 将来
-
-- 次のUI TaskでReact、Vite、static assetsを追加します。
-- FastAPI backend hostingとAPI proxyは別タスクです。
-- placeholder Workerをclient-side search実装へ拡張しません。
