@@ -1,0 +1,359 @@
+name: Deploy Cloudflare ranked API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloudflare-api-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      API_BASE_URL: https://trinitrotorol.com/game-guide/mhwilds-skill-sim/api
+      API_IMAGE: mhwilds-skill-sim-api:task065
+      API_CONTAINER: mhwilds-skill-sim-api-task065
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python project
+        run: python -m pip install ".[dev]"
+
+      - name: Run Python contract tests
+        run: python -m pytest
+
+      - name: Sync live MHDB Catalog
+        run: |
+          mkdir -p .build/production
+          python -m scripts.sync_mhdb_catalog \
+            "$RUNNER_TEMP/mhdb-raw" \
+            .build/production/catalog.json \
+            --locale ja \
+            --timeout-seconds 30
+
+      - name: Validate Catalog and ranked search
+        run: |
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          from mhwilds_skill_sim.api.search_service import (
+              search_catalog_ranked_build_candidates_with_cp_sat_from_payload,
+          )
+          from mhwilds_skill_sim.catalog.loader import load_catalog
+
+          path = Path(".build/production/catalog.json")
+          catalog = load_catalog(path=path)
+          counts = {
+              "skills": len(catalog.skills),
+              "equipment": len(catalog.equipment),
+              "decorations": len(catalog.decorations),
+          }
+          if catalog.schema_version != 1:
+              raise SystemExit("production Catalog schema_version must be 1")
+          if any(count == 0 for count in counts.values()):
+              raise SystemExit("production Catalog counts must be non-zero")
+
+          response = search_catalog_ranked_build_candidates_with_cp_sat_from_payload(
+              catalog=catalog,
+              payload={
+                  "requirements": [],
+                  "preferences": [],
+                  "max_results": 1,
+              },
+          )
+          candidates = response.get("candidates")
+          if not isinstance(candidates, list) or len(candidates) != 1:
+              raise SystemExit("ranked Catalog smoke must return one candidate")
+          if response.get("timed_out") is not False:
+              raise SystemExit("ranked Catalog smoke timed out")
+          if candidates[0].get("preference_score") != 0:
+              raise SystemExit("ranked Catalog smoke returned an invalid score")
+
+          print(f"catalog_schema_version={catalog.schema_version}")
+          print("catalog_counts=" + ",".join(f"{key}:{value}" for key, value in counts.items()))
+          print(f"catalog_sha256={sha256(path.read_bytes()).hexdigest()}")
+          print("ranked_catalog_smoke=ok,candidates:1,timed_out:false")
+          PY
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cloudflare/mhwilds-skill-sim-api/package-lock.json
+
+      - name: Install API Worker dependencies
+        run: npm --prefix cloudflare/mhwilds-skill-sim-api ci
+
+      - name: Run API Worker tests
+        run: npm --prefix cloudflare/mhwilds-skill-sim-api run test
+
+      - name: Verify Docker daemon
+        run: |
+          docker version
+          docker info
+
+      - name: Build API image
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            --file Dockerfile.api \
+            --tag "$API_IMAGE" \
+            .
+
+      - name: Start API container
+        run: |
+          docker run --detach \
+            --name "$API_CONTAINER" \
+            --publish 127.0.0.1:18080:8080 \
+            --memory 1g \
+            --cpus 0.25 \
+            "$API_IMAGE"
+
+      - name: Smoke test API container
+        run: |
+          health_status="000"
+          for attempt in $(seq 1 30); do
+            health_status="$(curl --silent --show-error \
+              --connect-timeout 2 \
+              --max-time 5 \
+              --output "$RUNNER_TEMP/local-health.json" \
+              --write-out '%{http_code}' \
+              http://127.0.0.1:18080/health || true)"
+            if [ "$health_status" = "200" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$health_status" != "200" ]; then
+            echo "local API health did not become ready (HTTP $health_status)"
+            exit 1
+          fi
+
+          metadata_status="$(curl --silent --show-error \
+            --connect-timeout 2 \
+            --max-time 10 \
+            --output "$RUNNER_TEMP/local-metadata.json" \
+            --write-out '%{http_code}' \
+            http://127.0.0.1:18080/catalog/metadata || true)"
+          ranked_status="$(curl --silent --show-error \
+            --connect-timeout 2 \
+            --max-time 30 \
+            --output "$RUNNER_TEMP/local-ranked.json" \
+            --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' \
+            --data '{"requirements":[],"preferences":[],"max_results":1}' \
+            http://127.0.0.1:18080/search/cp-sat/ranked || true)"
+          if [ "$metadata_status" != "200" ] || [ "$ranked_status" != "200" ]; then
+            echo "local API smoke failed (metadata=$metadata_status ranked=$ranked_status)"
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          temporary = Path(os.environ["RUNNER_TEMP"])
+          health = json.loads((temporary / "local-health.json").read_text(encoding="utf-8"))
+          metadata = json.loads((temporary / "local-metadata.json").read_text(encoding="utf-8"))
+          ranked = json.loads((temporary / "local-ranked.json").read_text(encoding="utf-8"))
+          if health != {"status": "ok"}:
+              raise SystemExit("local health response is invalid")
+          counts = metadata.get("counts")
+          if metadata.get("schema_version") != 1 or not isinstance(counts, dict):
+              raise SystemExit("local metadata response is invalid")
+          if any(counts.get(key, 0) <= 0 for key in ("skills", "equipment", "decorations")):
+              raise SystemExit("local metadata counts must be non-zero")
+          candidates = ranked.get("candidates")
+          if not isinstance(candidates, list) or len(candidates) != 1:
+              raise SystemExit("local ranked response must contain one candidate")
+          if ranked.get("timed_out") is not False:
+              raise SystemExit("local ranked response timed out")
+          if candidates[0].get("preference_score") != 0:
+              raise SystemExit("local ranked response score is invalid")
+          print("local_api_smoke=ok")
+          PY
+
+          uid="$(docker exec "$API_CONTAINER" id -u)"
+          if [ "$uid" = "0" ]; then
+            echo "API container must not run as root"
+            exit 1
+          fi
+
+          container_health=""
+          for attempt in $(seq 1 30); do
+            container_health="$(docker inspect \
+              --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+              "$API_CONTAINER")"
+            if [ "$container_health" = "healthy" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$container_health" != "healthy" ]; then
+            echo "API container healthcheck did not become healthy"
+            exit 1
+          fi
+
+          docker logs "$API_CONTAINER" > "$RUNNER_TEMP/api-container.log" 2>&1
+          if grep --extended-regexp --ignore-case --quiet \
+            'authorization|cookie|cf-connecting-ip|requirements|preferences|api[_-]?token|account[_-]?id|bearer' \
+            "$RUNNER_TEMP/api-container.log"; then
+            echo "API container log contains a forbidden sensitive field or request body"
+            exit 1
+          fi
+
+      - name: Stop and remove smoke container
+        if: always()
+        run: docker rm --force "$API_CONTAINER" 2>/dev/null || true
+
+      - name: Deploy API Worker and Container
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4.110.0 deploy --config wrangler.api.jsonc
+
+      - name: List deployed Containers
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4.110.0 containers list --config wrangler.api.jsonc
+
+      - name: Wait for public API health
+        run: |
+          deadline=$((SECONDS + 600))
+          delay=5
+          health_status="000"
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            remaining=$((deadline - SECONDS))
+            if [ "$remaining" -le 0 ]; then
+              break
+            fi
+            request_timeout=10
+            if [ "$remaining" -lt "$request_timeout" ]; then
+              request_timeout="$remaining"
+            fi
+            health_status="$(curl --silent --show-error \
+              --connect-timeout 5 \
+              --max-time "$request_timeout" \
+              --output "$RUNNER_TEMP/public-health.json" \
+              --dump-header "$RUNNER_TEMP/public-health.headers" \
+              --write-out '%{http_code}' \
+              "$API_BASE_URL/health" || true)"
+            if [ "$health_status" = "200" ]; then
+              break
+            fi
+            echo "public API health is not ready (HTTP $health_status); retrying"
+            remaining=$((deadline - SECONDS))
+            if [ "$remaining" -le 0 ]; then
+              break
+            fi
+            sleep_for="$delay"
+            if [ "$remaining" -lt "$sleep_for" ]; then
+              sleep_for="$remaining"
+            fi
+            sleep "$sleep_for"
+            if [ "$delay" -lt 30 ]; then
+              delay=$((delay * 2))
+              if [ "$delay" -gt 30 ]; then
+                delay=30
+              fi
+            fi
+          done
+          if [ "$health_status" != "200" ]; then
+            echo "public API health did not become ready within 10 minutes"
+            exit 1
+          fi
+
+      - name: Smoke test public API
+        run: |
+          metadata_status="$(curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 30 \
+            --output "$RUNNER_TEMP/public-metadata.json" \
+            --dump-header "$RUNNER_TEMP/public-metadata.headers" \
+            --write-out '%{http_code}' \
+            "$API_BASE_URL/catalog/metadata" || true)"
+          ranked_status="$(curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 30 \
+            --output "$RUNNER_TEMP/public-ranked.json" \
+            --dump-header "$RUNNER_TEMP/public-ranked.headers" \
+            --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' \
+            --data '{"requirements":[],"preferences":[],"max_results":1}' \
+            "$API_BASE_URL/search/cp-sat/ranked" || true)"
+          if [ "$metadata_status" != "200" ] || [ "$ranked_status" != "200" ]; then
+            echo "public API smoke failed (metadata=$metadata_status ranked=$ranked_status)"
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          temporary = Path(os.environ["RUNNER_TEMP"])
+
+          def read_json(name: str) -> object:
+              return json.loads((temporary / name).read_text(encoding="utf-8"))
+
+          def read_headers(name: str) -> dict[str, list[str]]:
+              headers: dict[str, list[str]] = {}
+              for line in (temporary / name).read_text(encoding="utf-8").splitlines():
+                  if ":" not in line:
+                      continue
+                  key, value = line.split(":", 1)
+                  headers.setdefault(key.strip().lower(), []).append(value.strip())
+              return headers
+
+          health = read_json("public-health.json")
+          metadata = read_json("public-metadata.json")
+          ranked = read_json("public-ranked.json")
+          if health != {"status": "ok"}:
+              raise SystemExit("public health response is invalid")
+
+          counts = metadata.get("counts") if isinstance(metadata, dict) else None
+          if metadata.get("schema_version") != 1 or not isinstance(counts, dict):
+              raise SystemExit("public metadata response is invalid")
+          if any(counts.get(key, 0) <= 0 for key in ("skills", "equipment", "decorations")):
+              raise SystemExit("public metadata counts must be non-zero")
+
+          candidates = ranked.get("candidates") if isinstance(ranked, dict) else None
+          if not isinstance(candidates, list) or len(candidates) != 1:
+              raise SystemExit("public ranked response must contain one candidate")
+          if ranked.get("timed_out") is not False:
+              raise SystemExit("public ranked response timed out")
+          if candidates[0].get("preference_score") != 0:
+              raise SystemExit("public ranked response score is invalid")
+
+          for prefix in ("public-health", "public-metadata", "public-ranked"):
+              headers = read_headers(f"{prefix}.headers")
+              if headers.get("cache-control") != ["no-store"]:
+                  raise SystemExit(f"{prefix} must set Cache-Control: no-store")
+              if "set-cookie" in headers:
+                  raise SystemExit(f"{prefix} must not set Set-Cookie")
+              if any("*" in value for value in headers.get("access-control-allow-origin", [])):
+                  raise SystemExit(f"{prefix} must not enable wildcard CORS")
+
+          for name in ("public-health.json", "public-metadata.json", "public-ranked.json"):
+              body = (temporary / name).read_text(encoding="utf-8").lower()
+              if "traceback" in body or "stack trace" in body:
+                  raise SystemExit(f"{name} exposed a stack trace")
+
+          print("public_api_smoke=ok")
+          PY

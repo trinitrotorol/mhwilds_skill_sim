@@ -1,0 +1,26 @@
+FROM python:3.12.13-slim@sha256:c3d81d25b3154142b0b42eb1e61300024426268edeb5b5a26dd7ddf64d9daf28
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+RUN python -m pip install --no-cache-dir . \
+    && groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid 10001 --no-create-home \
+        --home-dir /nonexistent --shell /usr/sbin/nologin app
+
+COPY .build/production/catalog.json ./catalog.json
+
+USER 10001:10001
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).close()"]
+
+ENTRYPOINT ["python", "-m", "scripts.serve_api", "/app/catalog.json", "--host", "0.0.0.0", "--port", "8080"]

@@ -2,7 +2,7 @@
 
 ## 目的
 
-Worker `mhwilds-skill-sim`は、React/Viteのbuild outputをCloudflare Static Assetsから配信し、同一originの限定API pathだけを将来のFastAPI backendへ中継します。placeholder HTMLやSPA fallbackは使用しません。
+Worker `mhwilds-skill-sim`は、React/Viteのbuild outputをCloudflare Static Assetsから配信し、同一originの限定API pathに対する503 fallbackを維持します。production APIは、よりspecificな別routeから専用API Workerへ送られます。placeholder HTMLやSPA fallbackは使用しません。
 
 配信pathは次の2種類です。
 
@@ -53,9 +53,11 @@ GET  /game-guide/mhwilds-skill-sim/api/catalog/metadata
 POST /game-guide/mhwilds-skill-sim/api/search/cp-sat/ranked
 ```
 
-現在の本番環境では`API_ORIGIN`は未設定です。その間、APIは503と`search API is not configured`を返し、React UIは「検索APIを準備しています」とretry buttonを表示します。
+productionでは、既存frontend routeよりspecificな
+`trinitrotorol.com/game-guide/mhwilds-skill-sim/api/*`を専用Worker
+`mhwilds-skill-sim-api`へ割り当てます。specific routeが先にmatchするため、このfrontend Workerの`API_ORIGIN`設定は不要です。API Workerが未deploy、またはspecific routeが未設定の場合は、このWorkerがAPI pathを受けて従来どおり503と`search API is not configured`を返し、React UIは「検索APIを準備しています」とretry buttonを表示します。
 
-将来backendを用意した後、`API_ORIGIN`をCloudflareのWorker環境変数として設定します。値はpath、query、fragment、credentialsを含まない別originのabsolute HTTPS originに限定し、repositoryや`wrangler.jsonc`へ値をcommitしません。route/domain設定の変更は不要です。
+frontendの既存Cloudflare Git integrationは維持します。API deployは別のmanual GitHub Actions workflow `.github/workflows/deploy-cloudflare-api.yml`だけから実行し、pushによる自動API deployは行いません。
 
 ## Public URL
 
@@ -66,7 +68,7 @@ https://trinitrotorol.com/game-guide/mhwilds-skill-sim/
 https://mhwilds-skill-sim.trinitrotorol.workers.dev/game-guide/mhwilds-skill-sim/
 ```
 
-slashなしURLがqueryを維持して308になること、HTMLとgenerated JS/CSSが200になること、API未設定の503をUIが準備中状態として扱うことも確認します。
+slashなしURLがqueryを維持して308になること、HTMLとgenerated JS/CSSが200になることを確認します。API Workerのdeploy後はhealthとnon-emptyなCatalog metadataが200であること、empty requirements/preferencesかつ`max_results=1`のranked検索がcandidateを返すことも確認します。API Worker未deploy時は従来の503 fallbackを確認します。
 
 ## Actual browser smoke
 
@@ -74,11 +76,11 @@ custom-domain pageを実際のbrowserで開き、desktop相当`1440 x 900`とmob
 
 ```text
 - React画面がrenderされる
-- header、「検索APIを準備しています」、retry buttonが表示される
+- headerと検索formが表示され、API Worker deploy後は「検索APIを準備しています」が表示されない（未deploy時は準備中表示とretry buttonが表示される）
 - layout崩れ、horizontal overflow、JS/CSS load failureがない
 - keyboard focusを操作できる
 - consoleにuncaught errorがない
-- networkで限定APIが意図した503 JSONを返す
+- networkでhealth、metadata、ranked検索が成功する（API Worker未deploy時は意図した503 JSONを返す）
 - 古いplaceholderだけの表示ではない
 ```
 

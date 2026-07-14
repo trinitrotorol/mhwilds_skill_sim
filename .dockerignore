@@ -1,0 +1,12 @@
+**
+!pyproject.toml
+!Dockerfile.api
+!src/
+!src/**
+!scripts/
+!scripts/**
+!.build/
+!.build/production/
+!.build/production/catalog.json
+**/__pycache__/
+**/*.py[cod]

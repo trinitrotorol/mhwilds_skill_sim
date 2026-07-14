@@ -39,4 +39,11 @@ production base pathは`/game-guide/mhwilds-skill-sim/`です。build結果は
 
 production backendが未設定でmetadata endpointから規定の503 responseが返った場合、画面はmock結果を生成せず「検索APIを準備しています」と表示します。
 
+production APIは、既存frontend routeよりspecificな
+`trinitrotorol.com/game-guide/mhwilds-skill-sim/api/*`を専用Worker
+`mhwilds-skill-sim-api`へ割り当てます。このAPI Workerが未deploy、またはspecific routeが未設定の場合は、既存frontend WorkerがAPI pathを受けて従来の503 fallbackを返します。productionで`API_ORIGIN`を設定する必要はありません。
+
+frontendの既存Cloudflare Git integrationは維持し、APIは別のmanual GitHub Actions workflow
+`.github/workflows/deploy-cloudflare-api.yml`からだけdeployします。deploy後はhealth、non-emptyなCatalog metadata、empty requirements/preferencesかつ`max_results=1`のranked検索を確認し、公開画面をdesktop `1440 x 900`とmobile `390 x 844`の実browserで検証します。
+
 `apps/web/dist/`は生成物です。Gitへcommitしません。

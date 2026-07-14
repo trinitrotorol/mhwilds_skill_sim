@@ -1,0 +1,49 @@
+{
+  "name": "mhwilds-skill-sim-api",
+  "main": "cloudflare/mhwilds-skill-sim-api/src/index.mjs",
+  "compatibility_date": "2026-07-14",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "trinitrotorol.com/game-guide/mhwilds-skill-sim/api/*",
+      "zone_name": "trinitrotorol.com"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "SearchApiContainer",
+      "image": "./Dockerfile.api",
+      "max_instances": 1,
+      "instance_type": "basic"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SEARCH_API",
+        "class_name": "SearchApiContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "SearchApiContainer"
+      ]
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "SEARCH_RATE_LIMITER",
+      "namespace_id": "65065",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
