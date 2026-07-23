@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Browser Solver Feasibility Benchmark</title>
+  </head>
+  <body>
+    <main class="benchmark-shell">
+      <header class="benchmark-header">
+        <p class="local-only">Local development only</p>
+        <h1>Browser Solver Feasibility Benchmark</h1>
+        <p>
+          Runs the exact top-1 TypeScript solver in a dedicated Web Worker
+          against the locally generated Catalog and CP-SAT oracle.
+        </p>
+      </header>
+
+      <section class="benchmark-controls" aria-labelledby="controls-heading">
+        <h2 id="controls-heading">Controls</h2>
+        <div class="button-row">
+          <button id="run-benchmark" type="button">Run benchmark</button>
+          <button id="cancel-benchmark" type="button" disabled>Cancel</button>
+          <button id="download-report" type="button" disabled>
+            Download JSON
+          </button>
+        </div>
+        <p id="benchmark-status" role="status" aria-live="polite">Idle</p>
+      </section>
+
+      <section aria-labelledby="measurements-heading">
+        <h2 id="measurements-heading">Measurements</h2>
+        <dl id="benchmark-measurements" class="measurements"></dl>
+      </section>
+
+      <section aria-labelledby="results-heading">
+        <h2 id="results-heading">Case results</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Case</th>
+                <th scope="col">Status</th>
+                <th scope="col">Min</th>
+                <th scope="col">Median</th>
+                <th scope="col">Max</th>
+                <th scope="col">Score</th>
+                <th scope="col">Decorations</th>
+                <th scope="col">Visited</th>
+                <th scope="col">Pruned</th>
+                <th scope="col">Parity</th>
+                <th scope="col">Deterministic</th>
+              </tr>
+            </thead>
+            <tbody id="benchmark-results"></tbody>
+          </table>
+        </div>
+      </section>
+      <output id="benchmark-report-json" hidden></output>
+    </main>
+    <script type="module" src="./src/browser-solver/benchmark-page.ts"></script>
+  </body>
+</html>

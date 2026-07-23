@@ -1,9 +1,19 @@
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
+import { createBrowserSolverBenchmarkMiddleware } from "./src/browser-solver/vite-benchmark-middleware";
 import { APPLICATION_BASE_PATH } from "./src/lib/paths";
 
 const APPLICATION_API_PREFIX = `${APPLICATION_BASE_PATH}api`;
+const BROWSER_SOLVER_BENCHMARK_CATALOG_PATH = resolve(
+  process.cwd(),
+  "../../.build/browser-solver/browser-catalog.json",
+);
+const BROWSER_SOLVER_BENCHMARK_ORACLE_PATH = resolve(
+  process.cwd(),
+  "../../.build/browser-solver/oracle.json",
+);
 
 const ALLOWED_LOCAL_API_PATHS = new Set([
   `${APPLICATION_API_PREFIX}/health`,
@@ -28,7 +38,20 @@ export function rewriteLocalApiPath(requestPath: string): string {
 
 export default defineConfig({
   base: APPLICATION_BASE_PATH,
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "browser-solver-benchmark-local-files",
+      configureServer(server) {
+        server.middlewares.use(
+          createBrowserSolverBenchmarkMiddleware({
+            catalogPath: BROWSER_SOLVER_BENCHMARK_CATALOG_PATH,
+            oraclePath: BROWSER_SOLVER_BENCHMARK_ORACLE_PATH,
+          }),
+        );
+      },
+    },
+  ],
   build: {
     outDir: "dist/game-guide/mhwilds-skill-sim",
     emptyOutDir: true,

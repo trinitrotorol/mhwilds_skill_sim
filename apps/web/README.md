@@ -21,11 +21,42 @@ Viteはapplication API prefix
 `/game-guide/mhwilds-skill-sim/api`の既知のendpointだけを
 `http://127.0.0.1:8000`へproxyし、backendのpathへrewriteします。browserからはproductionと同じsame-origin URLを使用するため、CORS設定は不要です。
 
+## Browser solver feasibility benchmark
+
+Task 066のbenchmarkはlocal development専用です。repository rootの
+`.build/browser-solver/`へ、commit対象外の次の生成物を用意します。
+
+```text
+.build/browser-solver/browser-catalog.json
+.build/browser-solver/oracle.json
+```
+
+Vite開発serverを起動し、`/solver-benchmark.html`を直接開きます。このpageは
+compact Catalogとoracleをlocal-only middlewareから読み、exact top-1 solverを
+Web Worker内で実行します。caseごとのmin / median / max、探索counter、CP-SAT
+oracleとのparityを表示し、完了reportを
+`window.__MHWILDS_BROWSER_SOLVER_BENCHMARK__`へ置きます。
+
+Node benchmarkはrepository rootから実行します。
+
+```console
+npm --prefix apps/web run benchmark:browser-solver -- \
+  --catalog .build/browser-solver/browser-catalog.json \
+  --oracle .build/browser-solver/oracle.json \
+  --output .build/browser-solver/node-report.json \
+  --timeout-ms 10000 \
+  --repeats 3
+```
+
+`solver-benchmark.html`、compact Catalog、oracle、benchmark reportはproduction
+buildへ含めず、公開navigationやrouteにも追加しません。
+
 ## 検証
 
 リポジトリrootから次を実行します。
 
 ```console
+npm --prefix apps/web run test:browser-solver
 npm --prefix apps/web run test
 npm --prefix apps/web run lint
 npm --prefix apps/web run typecheck
