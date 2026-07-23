@@ -92,6 +92,15 @@ function defaultYieldBeforeSearch(): Promise<void> {
   });
 }
 
+function runCalibration(iterations: number): { elapsedMs: number; checksum: number } {
+  const startedAt = performance.now();
+  let checksum = 0x12345678;
+  for (let index = 0; index < iterations; index += 1) {
+    checksum = Math.imul(checksum ^ index, 1664525) + 1013904223;
+  }
+  return { elapsedMs: performance.now() - startedAt, checksum: checksum >>> 0 };
+}
+
 function errorResponse(
   code: BrowserSolverWorkerErrorCode,
   searchId?: string,
@@ -234,6 +243,26 @@ export function createBrowserSolverWorkerRuntime(
     active.cancelled = true;
   };
 
+  const handleCalibration = (message: Record<string, unknown>): void => {
+    if (
+      !hasExactKeys(message, ["type", "calibration_id", "iterations"]) ||
+      !validSearchId(message.calibration_id) ||
+      !Number.isSafeInteger(message.iterations) ||
+      Number(message.iterations) < 1
+    ) {
+      postMessage(errorResponse("invalid-message"));
+      return;
+    }
+    const result = runCalibration(Number(message.iterations));
+    postMessage({
+      type: "calibration",
+      calibration_id: message.calibration_id,
+      elapsed_ms: result.elapsedMs,
+      checksum: result.checksum,
+      cross_origin_isolated: globalThis.crossOriginIsolated,
+    });
+  };
+
   return Object.freeze({
     async handleMessage(value: unknown): Promise<void> {
       if (!isPlainObject(value) || typeof value.type !== "string") {
@@ -246,6 +275,9 @@ export function createBrowserSolverWorkerRuntime(
           return;
         case "search":
           await handleSearch(value);
+          return;
+        case "calibrate":
+          handleCalibration(value);
           return;
         case "cancel":
           handleCancel(value);

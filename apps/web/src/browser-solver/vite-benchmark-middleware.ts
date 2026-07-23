@@ -27,6 +27,16 @@ export interface BrowserSolverBenchmarkMiddlewareOptions {
   readonly readFile?: ReadFile;
 }
 
+export const BROWSER_SOLVER_BENCHMARK_DOCUMENT_PATH =
+  "/solver-benchmark.html";
+
+export const BROWSER_SOLVER_ISOLATION_HEADERS = Object.freeze({
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Permissions-Policy": "cross-origin-isolated=(self)",
+  "Cache-Control": "no-store",
+});
+
 export type BrowserSolverBenchmarkMiddleware = (
   request: BenchmarkMiddlewareRequest,
   response: BenchmarkMiddlewareResponse,
@@ -58,6 +68,25 @@ export function createBrowserSolverBenchmarkMiddleware(
 
   return (request, response, next): void => {
     if (request.method !== "GET" || request.url === undefined) {
+      next();
+      return;
+    }
+    const queryStart = request.url.indexOf("?");
+    const pathname =
+      queryStart === -1 ? request.url : request.url.slice(0, queryStart);
+    if (pathname === BROWSER_SOLVER_BENCHMARK_DOCUMENT_PATH) {
+      for (const [name, value] of Object.entries(
+        BROWSER_SOLVER_ISOLATION_HEADERS,
+      )) {
+        response.setHeader(name, value);
+      }
+      next();
+      return;
+    }
+    if (pathname === "/src/browser-solver/worker.ts") {
+      response.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+      response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+      response.setHeader("Cache-Control", "no-store");
       next();
       return;
     }

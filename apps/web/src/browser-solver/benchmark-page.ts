@@ -11,7 +11,36 @@ import { BrowserSolverWorkerClient } from "./worker-client";
 declare global {
   interface Window {
     __MHWILDS_BROWSER_SOLVER_BENCHMARK__?: BrowserBenchmarkReport;
+    __MHWILDS_BROWSER_SOLVER_CERTIFICATION__?: BrowserSolverCertificationBridge;
   }
+}
+
+export interface CertificationBridgeState {
+  readonly version: 1;
+  readonly ready: boolean;
+  readonly active_search_id: string | null;
+  readonly progress: Readonly<Record<string, number | null>> | null;
+  readonly cross_origin_isolated: boolean;
+  readonly worker_cross_origin_isolated: boolean | null;
+}
+
+export interface BrowserSolverCertificationBridge {
+  readonly version: 1;
+  getState(): CertificationBridgeState;
+  waitUntilReady(): Promise<void>;
+  runSuite(options: {
+    repeats: number;
+    timeout_ms: number;
+  }): Promise<BrowserBenchmarkReport>;
+  runCase(options: {
+    case_name: string;
+    repeats: number;
+    timeout_ms: number;
+  }): Promise<BrowserBenchmarkCaseReport>;
+  cancel(): void;
+  terminateWorker(): Promise<void>;
+  recreateWorker(): Promise<void>;
+  runWorkerCalibration(iterations: number): Promise<number>;
 }
 
 interface FetchedJson {
@@ -375,4 +404,150 @@ downloadButton.addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
-void runBenchmark();
+function createCertificationBridge(): BrowserSolverCertificationBridge {
+  let catalogValue: unknown;
+  let oracleValue: unknown;
+  let client: BrowserSolverWorkerClient | null = null;
+  let ready = false;
+  let activeId: string | null = null;
+  let progress: Readonly<Record<string, number | null>> | null = null;
+  let workerIsolated: boolean | null = null;
+
+  const initialize = async (): Promise<void> => {
+    if (ready) {
+      return;
+    }
+    const controller = new AbortController();
+    const [catalog, oracle] = await Promise.all([
+      fetchJson(BROWSER_SOLVER_BENCHMARK_CATALOG_URL, controller.signal),
+      fetchJson(BROWSER_SOLVER_BENCHMARK_ORACLE_URL, controller.signal),
+    ]);
+    catalogValue = catalog.value;
+    oracleValue = oracle.value;
+    client = new BrowserSolverWorkerClient();
+    await client.initialize(catalogValue);
+    const calibration = await client.calibrate(1);
+    workerIsolated = calibration.cross_origin_isolated;
+    ready = true;
+  };
+
+  const initialization = initialize().catch((error: unknown) => {
+    ready = false;
+    throw new Error(
+      error instanceof Error ? error.message : "certification bridge failed",
+    );
+  });
+
+  const run = async (
+    selectedCase: string | null,
+    repeats: number,
+    timeoutMs: number,
+  ): Promise<BrowserBenchmarkReport> => {
+    await initialization;
+    if (client === null) {
+      throw new Error("certification Worker is unavailable");
+    }
+    const source = sourceCatalogSha256(catalogValue);
+    let selectedOracle = oracleValue;
+    if (selectedCase !== null) {
+      const oracle = oracleValue as {
+        readonly format_version: 1;
+        readonly source_catalog_sha256: string;
+        readonly cases: readonly { readonly name: string }[];
+      };
+      const cases = oracle.cases.filter(({ name }) => name === selectedCase);
+      if (cases.length !== 1) {
+        throw new Error("unknown certification case");
+      }
+      selectedOracle = { ...oracle, cases };
+    }
+    return runBrowserSolverBenchmark({
+      sourceCatalogSha256: source,
+      oracleValue: selectedOracle,
+      runtime: "browser",
+      timeoutMs,
+      repeats,
+      runCase: async (request, context) => {
+        activeId = `certification:${context.name}:${context.warmup ? "warmup" : context.runIndex}`;
+        progress = null;
+        const result = await client!.search(request, {
+          searchId: activeId,
+          timeoutMs,
+          onProgress: (value) => {
+            progress = { ...value };
+          },
+        });
+        activeId = null;
+        return result;
+      },
+    });
+  };
+
+  return Object.freeze({
+    version: 1 as const,
+    getState: () => ({
+      version: 1 as const,
+      ready,
+      active_search_id: activeId,
+      progress,
+      cross_origin_isolated: window.crossOriginIsolated,
+      worker_cross_origin_isolated: workerIsolated,
+    }),
+    waitUntilReady: () => initialization,
+    runSuite: (options: { repeats: number; timeout_ms: number }) =>
+      run(null, options.repeats, options.timeout_ms),
+    runCase: async (options: {
+      case_name: string;
+      repeats: number;
+      timeout_ms: number;
+    }) => {
+      const report = await run(
+        options.case_name,
+        options.repeats,
+        options.timeout_ms,
+      );
+      const result = report.cases[0];
+      if (result === undefined) {
+        throw new Error("certification case produced no report");
+      }
+      return result;
+    },
+    cancel: () => {
+      if (activeId !== null) {
+        client?.cancel(activeId);
+        activeId = null;
+      }
+    },
+    terminateWorker: async () => {
+      client?.dispose();
+      client = null;
+      ready = false;
+      activeId = null;
+    },
+    recreateWorker: async () => {
+      client?.dispose();
+      client = new BrowserSolverWorkerClient();
+      await client.initialize(catalogValue);
+      const calibration = await client.calibrate(1);
+      workerIsolated = calibration.cross_origin_isolated;
+      ready = true;
+    },
+    runWorkerCalibration: async (iterations: number) => {
+      await initialization;
+      if (client === null) {
+        throw new Error("certification Worker is unavailable");
+      }
+      const result = await client.calibrate(iterations);
+      workerIsolated = result.cross_origin_isolated;
+      return result.elapsed_ms;
+    },
+  });
+}
+
+const pageParameters = new URLSearchParams(window.location.search);
+if (pageParameters.has("certification")) {
+  window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__ =
+    createCertificationBridge();
+} else if (!pageParameters.has("certification-blank")) {
+  void runBenchmark();
+}

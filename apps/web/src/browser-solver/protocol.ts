@@ -21,9 +21,16 @@ export interface BrowserSolverWorkerCancelRequest {
   readonly search_id: string;
 }
 
+export interface BrowserSolverWorkerCalibrationRequest {
+  readonly type: "calibrate";
+  readonly calibration_id: string;
+  readonly iterations: number;
+}
+
 export type BrowserSolverWorkerRequest =
   | BrowserSolverWorkerInitRequest
   | BrowserSolverWorkerSearchRequest
+  | BrowserSolverWorkerCalibrationRequest
   | BrowserSolverWorkerCancelRequest;
 
 export interface BrowserSolverWorkerReadyResponse {
@@ -41,6 +48,14 @@ export interface BrowserSolverWorkerResultResponse {
   readonly type: "result";
   readonly search_id: string;
   readonly result: BrowserSolverResult;
+}
+
+export interface BrowserSolverWorkerCalibrationResponse {
+  readonly type: "calibration";
+  readonly calibration_id: string;
+  readonly elapsed_ms: number;
+  readonly checksum: number;
+  readonly cross_origin_isolated: boolean;
 }
 
 export type BrowserSolverWorkerErrorCode =
@@ -63,4 +78,5 @@ export type BrowserSolverWorkerResponse =
   | BrowserSolverWorkerReadyResponse
   | BrowserSolverWorkerProgressResponse
   | BrowserSolverWorkerResultResponse
+  | BrowserSolverWorkerCalibrationResponse
   | BrowserSolverWorkerErrorResponse;

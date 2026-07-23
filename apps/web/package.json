@@ -8,6 +8,8 @@
     "test": "vitest run",
     "test:browser-solver": "vitest run src/browser-solver",
     "benchmark:browser-solver": "tsx src/browser-solver/benchmark-cli.ts",
+    "install:browser-solver-chromium": "playwright install chromium",
+    "certify:browser-solver": "tsx src/browser-solver/certification-cli.ts",
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "build": "tsc -b && vite build"
@@ -31,6 +33,7 @@
     "eslint-plugin-react-refresh": "0.5.3",
     "globals": "17.7.0",
     "jsdom": "29.1.1",
+    "playwright": "1.61.1",
     "tsx": "4.22.5",
     "typescript": "6.0.3",
     "typescript-eslint": "8.64.0",

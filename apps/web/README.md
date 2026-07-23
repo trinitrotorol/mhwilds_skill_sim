@@ -51,6 +51,27 @@ npm --prefix apps/web run benchmark:browser-solver -- \
 `solver-benchmark.html`、compact Catalog、oracle、benchmark reportはproduction
 buildへ含めず、公開navigationやrouteにも追加しません。
 
+Task 067 の自動 certification は Playwright Chromium と CDP を使用します。
+Chromium だけをインストールし、repository root の ignored `.build` へ入力と
+出力を置いて実行します。
+
+```console
+npm --prefix apps/web run install:browser-solver-chromium
+npm --prefix apps/web run certify:browser-solver -- \
+  --catalog ../../.build/browser-solver/browser-catalog.json \
+  --oracle ../../.build/browser-solver/oracle.json \
+  --output ../../.build/browser-solver/browser-certification.json \
+  --screenshot-directory ../../.build/browser-solver/certification-screenshots \
+  --repeats 5 \
+  --timeout-ms 20000
+```
+
+この runner は local benchmark document だけを cross-origin isolated にし、
+desktop 1x、低速 mobile 相当 profile の requested 4x、page/Worker calibration、
+CDP heap、5-cycle retention、cancel/restart を記録します。requested 4x は実端末
+測定ではなく、Worker calibration gateを通過した場合だけ4x certificationとして
+扱います。JSON report と screenshot は commitしません。
+
 ## 検証
 
 リポジトリrootから次を実行します。

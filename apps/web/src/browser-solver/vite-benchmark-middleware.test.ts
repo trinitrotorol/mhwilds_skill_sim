@@ -15,6 +15,10 @@ import {
   BROWSER_SOLVER_BENCHMARK_ORACLE_URL,
 } from "./benchmark";
 import { createBrowserSolverBenchmarkMiddleware } from "./vite-benchmark-middleware";
+import {
+  BROWSER_SOLVER_BENCHMARK_DOCUMENT_PATH,
+  BROWSER_SOLVER_ISOLATION_HEADERS,
+} from "./vite-benchmark-middleware";
 
 interface CapturedResponse {
   statusCode: number;
@@ -75,7 +79,7 @@ describe("browser solver benchmark Vite middleware", () => {
     "/__browser-solver-benchmark/../secret.json",
     "/__browser-solver-benchmark/oracle.json/extra",
     "/.build/browser-solver/browser-catalog.json",
-    "/solver-benchmark.html",
+    "/solver-benchmark-other.html",
   ])("passes through a non-exact URL: %s", (url) => {
     const read = vi.fn();
     const middleware = createBrowserSolverBenchmarkMiddleware({
@@ -88,6 +92,22 @@ describe("browser solver benchmark Vite middleware", () => {
     middleware({ method: "GET", url }, response(), next);
 
     expect(read).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("adds isolation headers only to the exact benchmark document", () => {
+    const middleware = createBrowserSolverBenchmarkMiddleware({
+      catalogPath: "catalog-path",
+      oraclePath: "oracle-path",
+    });
+    const captured = response();
+    const next = vi.fn();
+    middleware(
+      { method: "GET", url: BROWSER_SOLVER_BENCHMARK_DOCUMENT_PATH },
+      captured,
+      next,
+    );
+    expect(captured.headers).toEqual(BROWSER_SOLVER_ISOLATION_HEADERS);
     expect(next).toHaveBeenCalledOnce();
   });
 

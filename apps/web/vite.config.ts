@@ -7,12 +7,12 @@ import { APPLICATION_BASE_PATH } from "./src/lib/paths";
 
 const APPLICATION_API_PREFIX = `${APPLICATION_BASE_PATH}api`;
 const BROWSER_SOLVER_BENCHMARK_CATALOG_PATH = resolve(
-  process.cwd(),
-  "../../.build/browser-solver/browser-catalog.json",
+  process.env.MHWILDS_BROWSER_SOLVER_CATALOG ??
+    resolve(process.cwd(), "../../.build/browser-solver/browser-catalog.json"),
 );
 const BROWSER_SOLVER_BENCHMARK_ORACLE_PATH = resolve(
-  process.cwd(),
-  "../../.build/browser-solver/oracle.json",
+  process.env.MHWILDS_BROWSER_SOLVER_ORACLE ??
+    resolve(process.cwd(), "../../.build/browser-solver/oracle.json"),
 );
 
 const ALLOWED_LOCAL_API_PATHS = new Set([

@@ -39,6 +39,17 @@ interface PendingSearch {
     | undefined;
 }
 
+interface PendingCalibration {
+  readonly resolve: (value: WorkerCalibrationResult) => void;
+  readonly reject: (error: Error) => void;
+}
+
+export interface WorkerCalibrationResult {
+  readonly elapsed_ms: number;
+  readonly checksum: number;
+  readonly cross_origin_isolated: boolean;
+}
+
 type ClientState =
   | "new"
   | "initializing"
@@ -62,6 +73,7 @@ function asWorkerResponse(value: unknown): BrowserSolverWorkerResponse | null {
     response.type !== "ready" &&
     response.type !== "progress" &&
     response.type !== "result" &&
+    response.type !== "calibration" &&
     response.type !== "error"
   ) {
     return null;
@@ -93,6 +105,7 @@ export class BrowserSolverWorkerClient {
   readonly #workerFactory: BrowserSolverWorkerFactory;
   readonly #now: () => number;
   readonly #pending = new Map<string, PendingSearch>();
+  readonly #pendingCalibrations = new Map<string, PendingCalibration>();
   #state: ClientState = "new";
   #worker: WorkerLike | null = null;
   #catalog: unknown;
@@ -185,6 +198,22 @@ export class BrowserSolverWorkerClient {
     return true;
   }
 
+  async calibrate(iterations: number): Promise<WorkerCalibrationResult> {
+    await this.#ready();
+    if (!Number.isSafeInteger(iterations) || iterations < 1) {
+      throw new TypeError("iterations must be a positive safe integer");
+    }
+    const calibrationId = `calibration-${++this.#searchSequence}`;
+    return new Promise((resolve, reject) => {
+      this.#pendingCalibrations.set(calibrationId, { resolve, reject });
+      this.#worker?.postMessage({
+        type: "calibrate",
+        calibration_id: calibrationId,
+        iterations,
+      });
+    });
+  }
+
   dispose(): void {
     if (this.#state === "disposed") {
       return;
@@ -200,6 +229,10 @@ export class BrowserSolverWorkerClient {
       pending.reject(error);
     }
     this.#pending.clear();
+    for (const pending of this.#pendingCalibrations.values()) {
+      pending.reject(error);
+    }
+    this.#pendingCalibrations.clear();
   }
 
   async #ready(): Promise<void> {
@@ -238,10 +271,14 @@ export class BrowserSolverWorkerClient {
         this.#handleResponse(event.data);
       }
     });
-    worker.addEventListener("error", () => {
+    worker.addEventListener("error", (event) => {
       if (generation === this.#workerGeneration) {
         this.#failWorker(
-          new Error("Browser solver worker encountered an error"),
+          new Error(
+            typeof event.message !== "string" || event.message.length === 0
+              ? "Browser solver worker encountered an error"
+              : `Browser solver worker error: ${event.message}`,
+          ),
         );
       }
     });
@@ -276,6 +313,18 @@ export class BrowserSolverWorkerClient {
         }
         return;
       }
+      case "calibration": {
+        const pending = this.#pendingCalibrations.get(response.calibration_id);
+        if (pending !== undefined) {
+          this.#pendingCalibrations.delete(response.calibration_id);
+          pending.resolve({
+            elapsed_ms: response.elapsed_ms,
+            checksum: response.checksum,
+            cross_origin_isolated: response.cross_origin_isolated,
+          });
+        }
+        return;
+      }
       case "error": {
         const error = errorFromResponse(response);
         if (response.search_id !== undefined) {
@@ -303,6 +352,10 @@ export class BrowserSolverWorkerClient {
       pending.reject(error);
     }
     this.#pending.clear();
+    for (const pending of this.#pendingCalibrations.values()) {
+      pending.reject(error);
+    }
+    this.#pendingCalibrations.clear();
   }
 
   #clearInitialization(): void {

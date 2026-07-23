@@ -9,6 +9,7 @@ function requestKind(request: BrowserSolverWorkerRequest): string {
   switch (request.type) {
     case "init":
     case "search":
+    case "calibrate":
     case "cancel":
       return request.type;
   }
@@ -19,6 +20,7 @@ function responseKind(response: BrowserSolverWorkerResponse): string {
     case "ready":
     case "progress":
     case "result":
+    case "calibration":
     case "error":
       return response.type;
   }

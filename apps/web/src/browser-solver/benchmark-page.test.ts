@@ -23,6 +23,8 @@ describe("local browser solver benchmark page", () => {
     expect(source).toMatch(
       /latestReport = null;\s+reportJsonElement\.textContent = "";\s+delete window\.__MHWILDS_BROWSER_SOLVER_BENCHMARK__/u,
     );
+    expect(source).toContain("__MHWILDS_BROWSER_SOLVER_CERTIFICATION__");
+    expect(source).toContain("version: 1 as const");
   });
 
   it("is not linked from the production HTML or React application", async () => {

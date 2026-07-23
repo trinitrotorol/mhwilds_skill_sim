@@ -262,6 +262,8 @@ viewport-only だった。memory も測定不能で、desktop run 間の性能�
 `mixed-ranked` の run 間変動と mobile/memory の GO 条件だけを判定する。
 公開 UI 統合や fallback 実装は、その判定後の別 Task とする。
 
+この推奨作業は Task 067 で実施済み。結果は次節に記録する。
+
 ## 18. Generated files
 
 次は測定生成物であり commit しない。
@@ -278,3 +280,139 @@ viewport-only だった。memory も測定不能で、desktop run 間の性能�
 
 既存 `.gitignore` が `.build/` 全体を ignore しているため、重複する
 `.build/browser-solver/` 行は追加しなかった。screenshot は commit していない。
+
+## 19. Task 067 certification
+
+### 19.1 Source and environment
+
+Task 067 は基準 commit
+`6e12437fa1aeb9f1a0c623fdf15dc7c8a5f9d3e8` 上の dirty working tree
+（certification実装中）で生成した machine-readable reportを数値ソースとした。
+Playwright `1.61.1`、bundled Chromium `149.0.7827.55`、Node
+`v24.14.0`、headless Windows 11
+（13th Gen Intel Core i5-1334U、12 logical CPUs、16,849,256,448 bytes）
+で実行した。
+
+live MHDB syncでsource Catalogが更新されたため、Task 066のhashへ合わせず
+oracleを再生成した。
+
+- source Catalog SHA-256:
+  `8b750231a6e33aa03168bee98ed3eaaf07060fdfba14694de2fbb66b0f52fae5`
+- compact Catalog SHA-256:
+  `923769007532f4374ed8cc7bb525f14646186b00a50f4fb90dc9cecd81aea4a2`
+- compact raw / gzip: 10,911,504 / 404,170 bytes
+- equipment variants 37,701、skills 179、decorations 361
+- oracle 8/8 optimal、timeout 0、total 38.031191 seconds
+
+### 19.2 CPU calibration
+
+pageとdedicated browser-solver Workerはともに
+`crossOriginIsolated === true`だった。固定loopは各rateでwarm-up 1回を除外し、
+3 samplesのmedian比を計算した。
+
+| target | rate 1 samples ms | rate 4 samples ms | median ratio |
+| --- | --- | --- | ---: |
+| page | 309.285 / 652.855 / 416.285 | 2,115.695 / 4,860.475 / 2,176.265 | 5.228 |
+| dedicated Worker | 321.595 / 429.845 / 285.440 | 302.760 / 326.995 / 298.805 | 0.941 |
+
+CDP `Emulation.setCPUThrottlingRate`はpage main threadへ作用したが、dedicated
+Workerの実測ratioはGO範囲2.5〜6.5に入らなかった。Worker target自身への同method
+はChromiumによりpage-only operationとして拒否される。したがって
+`cpu_throttle_verified=false`であり、以下のmobile profile結果をWorker込みの
+実4x certificationまたは実端末測定とは表現しない。
+
+### 19.3 Desktop 1x, five fresh suites
+
+fresh page + Workerで5 suitesを実行した。suite totalは
+2,632.7 / 2,257.2 / 2,355.0 / 2,162.0 / 2,450.4 ms。
+`mixed-ranked` per-suite medianは
+522.470 / 539.970 / 545.870 / 530.730 / 532.525 msだった。
+
+- across-suite min / median / max: 522.470 / 532.525 / 545.870 ms
+- coefficient of variation: 0.0150
+- max / median: 1.0251
+- Worker init min / median / max:
+  774.454 / 834.504 / 1,011.172 ms
+- desktop stability gate: pass
+
+全case optimal、parity true、nondeterminism 0、timeout 0、console/page error 0、
+tab crash 0だった。
+
+### 19.4 Requested mobile 4x profile
+
+390 × 844、device scale factor 2、mobile/touch有効、page CDP rate 4のheadless
+profileを5 fresh suitesで実行した。ただしWorker calibrationが不通過のため、
+これは低速mobile相当profileを意図したrequested 4xであり、verified Worker 4x
+または実端末結果ではない。
+
+| case | five suite medians ms | observed max ms |
+| --- | --- | ---: |
+| empty | 47.9 / 23.2 / 24.4 / 35.3 / 29.9 | 47.9 |
+| normal-required | 26.3 / 23.2 / 29.5 / 25.4 / 20.4 | 29.5 |
+| normal-preferred | 17.0 / 23.6 / 25.1 / 21.0 / 21.8 | 25.1 |
+| mixed-ranked | 1,595.6 / 1,228.8 / 1,716.5 / 2,206.0 / 1,593.3 | 2,206.0 |
+| series-required | 14.8 / 14.4 / 19.8 / 10.7 / 10.5 | 19.8 |
+| group-preferred | 14.9 / 11.3 / 15.3 / 22.7 / 9.4 | 22.7 |
+| weapon-filter | 4.9 / 7.7 / 6.8 / 7.7 / 10.0 | 10.0 |
+| impossible-stress | 38.9 / 24.6 / 57.6 / 36.4 / 29.8 | 57.6 |
+
+acceptance caseは全件optimal/parity true、timeout 0。Worker init
+min / median / maxは2,626.056 / 2,864.942 / 2,906.053 msで、median 3秒gateを
+通過した。
+
+### 19.5 Memory and five-cycle retention
+
+primary `performance.measureUserAgentSpecificMemory()`はpage/Worker isolationが
+trueでも全sampleで`SecurityError`を返した。利用不能を成功扱いにせず、primary
+256 MiB gateとprimary retention gateは未確認とした。
+
+supporting CDP `Runtime.getHeapUsage`はpage targetとactive dedicated Worker
+targetを個別にauto-attachして取得した。値はGC request後のused / total bytes。
+
+| stage | page used / total | Worker used / total |
+| --- | ---: | ---: |
+| blank benchmark baseline | 1,226,948 / 1,744,896 | — |
+| Catalog parse + Worker init | 18,029,904 / 18,984,960 | 36,687,104 / 38,100,992 |
+| post mixed-ranked | 18,074,164 / 18,984,960 | 36,985,708 / 39,149,568 |
+| post full suite | 18,122,232 / 19,509,248 | 37,047,196 / 39,149,568 |
+| Worker terminate + GC | 18,122,612 / 18,984,960 | terminated |
+| fifth cycle terminate + GC | 18,126,680 / 19,247,104 | terminated |
+
+5回の`init → mixed-ranked → terminate → GC`後のpage usedは順に
+18,129,200 / 18,132,316 / 18,140,148 / 18,125,572 / 18,126,680 bytes。
+CDP supporting値は連続増加せず、active Worker heapも取得できたが、primary total
+memoryがないため5-cycle retention GO gateは未確認である。raw heap snapshotは
+保存していない。
+
+### 19.6 Cancel/restart and correctness
+
+requested mobile profileで`mixed-ranked`のprogressを確認してterminate cancelし、
+同じCatalogでWorkerを再生成した。cancel時counterはelapsed 18.715 ms、
+visited/pruned/complete 0/0/0。cancel開始からreadyまで3,842.182 msで、restart後の
+`mixed-ranked`はoptimal、parity trueだった。stale optimal、crash、console/page
+errorはなかった。
+
+再生成したNode reportをPython validatorへ通し、8 cases、valid candidate 8、
+completed parity 8、parity failure 0、timeout/cancel 0を確認した。
+
+screenshotsはrepository外の
+`.build/browser-solver/certification-screenshots/`へ
+`desktop-before.png`、`desktop-after.png`、`mobile-4x-before.png`、
+`mobile-4x-after.png`、`mobile-4x-cancelled.png`を保存した。local benchmark
+pageでありpublic UIではない。
+
+### 19.7 Decision
+
+最終判定は **NO-GO**。
+
+correctness、desktop stability、requested mobile profileの観測値、
+cancel/restart、CDP supporting heapにはfailureがなかった。しかしGOに必須の
+dedicated Worker実4x ratioは0.941で、2.5〜6.5を満たさず、別CDP経路でもWorker
+target自身へthrottleを適用できなかった。さらにprimary memory APIが
+`SecurityError`で、total memory、256 MiB gates、primary retentionを認証できない。
+仕様のNO-GO条件「dedicated Workerへ4x throttleを確認できず、別手段でも検証不能」
+に該当するため、性能値が小さいことだけを理由にCONDITIONALまたはGOへ上げない。
+
+next recommended single taskは、browser solver本番統合を停止し、
+Google Cloud Runまたは既存Cloudflare Container案へ戻ることとする。Task 067内で
+Cloud Run、Cloudflare routing、quota、fallbackは変更しない。
