@@ -273,6 +273,8 @@ viewport-only だった。memory も測定不能で、desktop run 間の性能�
 - `.build/browser-solver/browser-catalog.json`
 - `.build/browser-solver/oracle.json`
 - `.build/browser-solver/node-report.json`
+- `.build/browser-solver/browser-certification-v2.json`
+- `.build/browser-solver/certification-v2-screenshots/`
 - `.build/browser-solver/tiny-browser-catalog.json`
 - `.build/browser-solver/tiny-oracle.json`
 - `.build/browser-solver/tiny-browser-report.json`
@@ -416,3 +418,199 @@ target自身へthrottleを適用できなかった。さらにprimary memory API
 next recommended single taskは、browser solver本番統合を停止し、
 Google Cloud Runまたは既存Cloudflare Container案へ戻ることとする。Task 067内で
 Cloud Run、Cloudflare routing、quota、fallbackは変更しない。
+
+### 19.8 Task 067判定の訂正
+
+Task 067時点のWorker throttle controllerは、`setRate()`でcurrent rateを更新する
+だけで、activeまたは新規attachされたdedicated Worker sessionへ
+`Emulation.setCPUThrottlingRate`を送信していなかった。このため19.2のWorker
+ratio `0.941x`は4x適用後の結果ではなく、4x性能証拠として使用できない。
+
+したがって19.7の`NO-GO`はsolver性能の`NO-GO`として使用しない。Task 068の
+再測定まではcorrected statusを`CONDITIONAL`とする。また、primary memoryの
+`SecurityError`は測定capability unavailableの証拠であり、memory exhaustionや
+OOMの証拠ではない。
+
+19.1〜19.7のraw測定値は履歴としてそのまま残す。数値の削除・改変は行わず、
+Task 068の修正後測定を別sectionとして追記する。
+
+## 20. Task 068 corrected certification
+
+### 20.1 Source and environment
+
+Task 068は基準commit
+`e316fc9310a852bed822d38a7ca8a40a16251624`上のdirty working tree
+（認証修正・文書化中）で、live syncから全入力を再生成して測定した。
+
+- source Catalog SHA-256:
+  `1f66350e95e35969ffa81e4699ad3e278002a1613b54c5285e17b2ce7a1e0145`
+- compact Catalog SHA-256:
+  `381cbece967b58f781b3db8660fd8c447dadb801e687a7573c21e26f2b7123c0`
+- compact raw / gzip: 11,432,578 / 408,045 bytes
+- source equipment 2,085、generated appraisal charm 0、
+  expanded equipment 37,701、skills 179、decorations 361
+- oracle SHA-256:
+  `b8eb0f02d2bc78b80fcefb75ca2152bcedf5348d1192bc83ff1cec60d6efff09`
+- oracle 8/8 optimal、timeout 0、total 34.247217 seconds
+- Node report SHA-256:
+  `0fe72553709a1612cb806e3f23fc94e3eb9b77006c034afb198f6427bbbf85ef`
+- Node report 8 cases × 3 runs、parity failure 0、
+  nondeterministic 0、timeout 0
+
+測定環境はPlaywright `1.61.1`、Chromium `149.0.7827.55`、Node
+`v24.14.0`、headless Windows `10.0.26200` x64、13th Gen Intel Core
+i5-1334U、12 logical CPUs、16,849,256,448 bytes memoryだった。
+
+最終v2 reportは
+`.build/browser-solver/browser-certification-v2.json`へ保存した。sizeは
+710,628 bytes、SHA-256は
+`1484c00a88436c2cdd57f45eb914925c65a2db80af469ac2f985803901489560`。
+reportと5 screenshotsは測定生成物でありcommitしない。
+
+### 20.2 Worker CDP command and calibration
+
+controllerはbrowser rootとpage sessionでflattened recursive auto-attachを有効にし、
+`waitForDebuggerOnStart: true`でWorkerを停止した状態で捕捉する。各Worker sessionへ
+current rateの`Emulation.setCPUThrottlingRate`をsession ID付きで送り、その応答後に
+`Runtime.runIfWaitingForDebugger`を1回だけ送る。active Workerと`setRate()`中または
+その後に新規attachされたWorkerの両方へ同じrateを適用する。
+
+最終Chromiumはrate 1とrate 4の両方でcommandを正式に拒否した。
+
+| rate | active | applied | unsupported | failed | protocol evidence |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 1 | 0 | 1 | 0 | `-32000`: `Operation is only supported for pages, not workers` |
+| 4 | 1 | 0 | 1 | 0 | `-32000`: `Operation is only supported for pages, not workers` |
+
+これはcommandを送らないno-opではない。protocol拒否後もWorkerはresumeされ、
+suiteを完走した。unexpected／transport failureは0。unit fake transportでは
+`applied`、`unsupported`、`failed`を別々に検証し、`failed_count > 0`ではCLI
+nonzeroかつfinal report非生成とする。
+
+各rateでpageとWorkerそれぞれwarm-up 1回を除外し、3 samplesを取得した。
+page／Workerとも`crossOriginIsolated === true`だった。
+
+| target | rate 1 samples ms | rate 4 samples ms | median ratio | status |
+| --- | --- | --- | ---: | --- |
+| page | 283.440 / 404.340 / 638.225 | 3,299.625 / 6,343.300 / 2,359.795 | 8.161 | supporting evidence |
+| dedicated Worker | 453.170 / 558.890 / 591.145 | 824.560 / 484.735 / 481.090 | 0.867 | `unsupported` |
+
+Workerのratioは補助値としてのみ保存し、4x verifiedとはしない。
+`measurement_status=unsupported`、`verified=false`、
+`cpu_throttle_verified=false`である。
+
+### 20.3 Desktop 1x
+
+fresh page + Workerで5 suitesを実行した。suite totalは
+1,916.623 / 1,715.209 / 2,309.328 / 2,445.608 / 2,242.421 ms。
+`mixed-ranked` per-suite medianは
+378.335 / 341.375 / 516.130 / 465.830 / 512.345 msだった。
+
+- across-suite min / median / max: 341.375 / 465.830 / 516.130 ms
+- coefficient of variation: 0.1603
+- max / median: 1.1080
+- Worker init min / median / max:
+  738.176 / 956.099 / 1,110.510 ms
+- desktop stability gate: pass
+
+### 20.4 Requested mobile profile
+
+390 × 844、device scale factor 2、mobile/touch有効、page rate 4のheadless
+profileを5 fresh suitesで実行した。Worker commandがunsupportedのため、
+これはrequested low-speed mobile-equivalent profileであり、verified Worker 4x
+または実mobile結果ではない。
+
+| case | five suite medians ms | observed max ms |
+| --- | --- | ---: |
+| empty | 76.945 / 33.285 / 16.285 / 25.465 / 33.895 | 76.945 |
+| normal-required | 24.600 / 44.855 / 26.110 / 21.640 / 33.130 | 44.855 |
+| normal-preferred | 12.495 / 32.195 / 22.735 / 18.865 / 19.255 | 32.195 |
+| mixed-ranked | 1,793.735 / 4,208.590 / 3,290.020 / 1,879.455 / 2,026.740 | 4,208.590 |
+| series-required | 16.075 / 14.385 / 14.085 / 17.270 / 45.485 | 45.485 |
+| group-preferred | 17.115 / 16.160 / 15.860 / 17.875 / 40.020 | 40.020 |
+| weapon-filter | 7.900 / 3.735 / 4.485 / 4.635 / 32.380 | 32.380 |
+| impossible-stress | 45.280 / 88.720 / 45.320 / 47.475 / 131.660 | 131.660 |
+
+35 acceptance caseは全件optimal／parity true、timeout 0。Worker init
+min / median / maxは1,669.796 / 2,147.309 / 2,258.967 msで、
+requested profileのperformance gateは通過した。
+
+### 20.5 Memory diagnostics and retention
+
+primary `performance.measureUserAgentSpecificMemory()`は全sampleで
+`SecurityError`を返した。
+
+```text
+Failed to execute 'measureUserAgentSpecificMemory' on 'Performance':
+performance.measureUserAgentSpecificMemory is not available.
+```
+
+各failureで`api_present=true`、secure context=true、window isolation=true、
+active Worker stageではWorker isolation=true、permission policyはunknown
+（`null`）、headless=trueを記録した。path、secret、stackはreportへ含めていない。
+これはbrowser capability unavailableでありOOMではない。headed retryは
+`not-attempted`として記録した。
+
+known unsupported capabilityかつeligible environmentであるため、CDP fallbackを
+採用した。GC request後のused / total bytesは次のとおり。
+
+| stage | page used / total | Worker used / total |
+| --- | ---: | ---: |
+| blank baseline | 1,247,716 / 2,269,184 | — |
+| Worker init | 18,194,512 / 18,984,960 | 36,831,880 / 38,100,992 |
+| post mixed-ranked | 18,219,612 / 19,247,104 | 37,134,888 / 39,411,712 |
+| post full suite | 18,266,304 / 19,771,392 | 37,192,344 / 39,411,712 |
+| post terminate | 18,270,140 / 19,247,104 | terminated |
+| retention cycle 10 | 18,283,124 / 18,722,816 | terminated |
+
+active page + Workerのpeak used合計は56,026,180 bytesで256 MiB以下。
+10-cycle terminate retentionのpage usedは順に
+18,271,712 / 18,273,868 / 18,260,168 / 18,266,112 / 18,266,356 /
+18,266,404 / 18,267,084 / 18,280,152 / 18,281,420 / 18,283,124 bytes。
+firstからfinalの増分は11,412 bytesで、連続増加ではなく、
+`max(32 MiB, first × 20%)`以下だった。memory limitsとretention gateは
+complete CDP fallbackで通過し、tab crash／OOMは0。
+
+### 20.6 Correctness and cancel/restart
+
+desktop 40 reportsとrequested mobile 40 reportsはすべてoptimal、parity true、
+deterministic trueだった。outer 5 suites間でもprofile別・case別のobjective
+signatureを比較した。Node側で全browser resultを独立再validationし、restart
+resultも含めたv2 evidence countsは次のとおり。
+
+- parity failure 0
+- invalid candidate 0
+- nondeterministic case 0
+- timeout 0
+- console/page error 0
+- request failure 0
+- tab crash 0
+- browser memory exhaustion 0
+
+Python validatorでもNode reportの8 cases、valid candidate 8、completed parity 8、
+parity failure 0、timeout/cancel 0を確認した。
+
+requested profileの`mixed-ranked`でprogressを観測後にWorkerをterminateし、
+同じCatalogで再生成した。cancel時はelapsed 23.185 ms、
+visited/pruned/complete 0/0/0。readyまで4,714.988 msで、restart後はoptimal、
+parity true、candidate再validation成功だった。cancel/restart gateはpass。
+
+### 20.7 Corrected decision
+
+最終判定は **CONDITIONAL**。
+
+`cpu_throttle_verified`だけが不通過で、desktop stability、requested mobile
+performance、correctness、runtime health、CDP memory limits、10-cycle retention、
+cancel/restartは通過した。Worker targetへのcommandは実送信されたが、Chromiumが
+protocol上unsupportedと正式に返したため、測定capability不足だけで`NO-GO`には
+しない。
+
+parity mismatch、invalid candidate、nondeterministic objective、tab crash、
+OOM、verified 512 MiB超peak、verified 128 MiB超の連続retention増加、
+verified 4xでの過半数timeoutという真の`NO-GO`条件は1件も実測されなかった。
+primary memory API unavailableもcomplete CDP fallbackで補完した。
+
+未確認なのは実mobileまたは別OS-level throttleでのWorker性能だけである。
+next recommended single taskは、同じCatalog/workloadを代表的な実mobile端末、
+またはWorkerへ実効適用できるOS-level throttleで測定することとする。
+solver algorithm、公開UI、Cloud Run、Cloudflare routingの変更は行わない。

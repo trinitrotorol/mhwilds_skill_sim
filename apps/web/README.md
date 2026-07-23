@@ -51,7 +51,7 @@ npm --prefix apps/web run benchmark:browser-solver -- \
 `solver-benchmark.html`、compact Catalog、oracle、benchmark reportはproduction
 buildへ含めず、公開navigationやrouteにも追加しません。
 
-Task 067 の自動 certification は Playwright Chromium と CDP を使用します。
+Task 068 の自動 certification は Playwright Chromium と CDP を使用します。
 Chromium だけをインストールし、repository root の ignored `.build` へ入力と
 出力を置いて実行します。
 
@@ -60,17 +60,25 @@ npm --prefix apps/web run install:browser-solver-chromium
 npm --prefix apps/web run certify:browser-solver -- \
   --catalog ../../.build/browser-solver/browser-catalog.json \
   --oracle ../../.build/browser-solver/oracle.json \
-  --output ../../.build/browser-solver/browser-certification.json \
-  --screenshot-directory ../../.build/browser-solver/certification-screenshots \
+  --output ../../.build/browser-solver/browser-certification-v2.json \
+  --screenshot-directory ../../.build/browser-solver/certification-v2-screenshots \
   --repeats 5 \
   --timeout-ms 20000
 ```
 
 この runner は local benchmark document だけを cross-origin isolated にし、
 desktop 1x、低速 mobile 相当 profile の requested 4x、page/Worker calibration、
-CDP heap、5-cycle retention、cancel/restart を記録します。requested 4x は実端末
-測定ではなく、Worker calibration gateを通過した場合だけ4x certificationとして
-扱います。JSON report と screenshot は commitしません。
+primary memory APIのcapability diagnostics、CDP heap、10-cycle retention、
+cancel/restart をformat version 2へ記録します。dedicated Worker sessionには
+`Emulation.setCPUThrottlingRate`を実送信し、`applied`、`unsupported`、`failed`
+をprotocol code/message付きで区別します。apply summaryの`failed_count > 0`は
+runnerをnonzeroで停止します。command applied後のratio gate外は
+`measurement_status: "unverified"`としてtransport failureと区別し、solver
+failureとは断定しません。この値はTask 068のratio gate外を曖昧にしないための
+format version 2拡張です。測定機能が`unsupported`なだけの場合もsolver failure
+と扱いません。requested 4xは実端末測定ではなく、Worker command適用と
+calibration gateの両方を通過した場合だけverified 4xとして扱います。JSON report
+とscreenshot は commitしません。
 
 ## 検証
 

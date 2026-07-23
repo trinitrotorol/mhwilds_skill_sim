@@ -23,25 +23,41 @@ import type {
   BrowserBenchmarkCaseReport,
   BrowserBenchmarkReport,
 } from "./benchmark";
+import { decodeBrowserSearchCatalog } from "./catalog";
+import { summarizeCertificationEvidence } from "./certification-evidence";
 import {
   decideCertification,
   parseCertificationArguments,
   statistics,
   type CertificationArguments,
 } from "./certification";
-import { decodeHeapUsage, decodePrimaryMemory } from "./cdp-memory";
 import {
+  CDP_FALLBACK_RETENTION_CYCLES,
+  cdpHeapPeakBytes,
+  decodeHeapUsage,
+  decodePrimaryMemory,
+  decodePrimaryMemoryDiagnostics,
+  memoryExhaustionObserved,
+  primaryMemoryFallbackEligible,
+  sanitizeDiagnosticMessage,
+  verifiedPrimaryMemoryPeakBytes,
+} from "./cdp-memory";
+import {
+  assertWorkerThrottleApplySucceeded,
+  collectCalibrationSamples,
   summarizeCalibration,
+  summarizeWorkerCalibration,
 } from "./cpu-calibration";
+import { validateBrowserSolverResult } from "./validation";
+import {
+  createWorkerCdpController,
+  WorkerCdpAttachmentTimeoutError,
+  type WorkerCdpController,
+  type WorkerThrottleApplySummary,
+} from "./worker-cdp-controller";
 
 const execFileAsync = promisify(execFile);
 const CALIBRATION_ITERATIONS = 50_000_000;
-
-interface WorkerThrottleController {
-  setRate(rate: number): Promise<void>;
-  sampleWorkerHeap(): Promise<unknown | null>;
-  close(): Promise<void>;
-}
 
 async function availablePort(): Promise<number> {
   const server = net.createServer();
@@ -57,127 +73,6 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-async function createWorkerThrottleController(
-  port: number,
-  initialRate: number,
-): Promise<WorkerThrottleController> {
-  let endpoint: string | null = null;
-  for (let attempt = 0; attempt < 50 && endpoint === null; attempt += 1) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`);
-      const value = (await response.json()) as { webSocketDebuggerUrl?: string };
-      endpoint = value.webSocketDebuggerUrl ?? null;
-    } catch {
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    }
-  }
-  if (endpoint === null) throw new Error("Chromium CDP endpoint unavailable");
-  const socket = new WebSocket(endpoint);
-  await new Promise<void>((resolveOpen, reject) => {
-    socket.addEventListener("open", () => resolveOpen(), { once: true });
-    socket.addEventListener("error", () => reject(new Error("CDP websocket failed")), {
-      once: true,
-    });
-  });
-  let rate = initialRate;
-  const workerSessions = new Set<string>();
-  let messageId = 0;
-  const pending = new Map<
-    number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
-  >();
-  const send = (
-    method: string,
-    params: Readonly<Record<string, unknown>> = {},
-    sessionId?: string,
-  ): Promise<unknown> =>
-    new Promise((resolveSend, reject) => {
-      const id = ++messageId;
-      pending.set(id, { resolve: resolveSend, reject });
-      socket.send(
-        JSON.stringify({
-          id,
-          method,
-          params,
-          ...(sessionId === undefined ? {} : { sessionId }),
-        }),
-      );
-    });
-  socket.addEventListener("message", (event) => {
-    const value = JSON.parse(String(event.data)) as {
-      id?: number;
-      method?: string;
-      params?: {
-        sessionId?: string;
-        targetInfo?: { type?: string };
-      };
-      error?: { message?: string };
-      result?: unknown;
-    };
-    if (value.id !== undefined) {
-      const waiter = pending.get(value.id);
-      pending.delete(value.id);
-      if (value.error === undefined) waiter?.resolve(value.result);
-      else waiter?.reject(new Error(value.error.message ?? "CDP command failed"));
-      return;
-    }
-    if (
-      value.method === "Target.detachedFromTarget" &&
-      value.params?.sessionId !== undefined
-    ) {
-      workerSessions.delete(value.params.sessionId);
-      return;
-    }
-    if (
-      value.method !== "Target.attachedToTarget" ||
-      value.params?.sessionId === undefined
-    ) {
-      return;
-    }
-    const sessionId = value.params.sessionId;
-    const configure = async (): Promise<void> => {
-      if (value.params?.targetInfo?.type === "page") {
-        await send(
-          "Target.setAutoAttach",
-          {
-            autoAttach: true,
-            waitForDebuggerOnStart: true,
-            flatten: true,
-          },
-          sessionId,
-        );
-      }
-      if (value.params?.targetInfo?.type === "worker") {
-        workerSessions.add(sessionId);
-      }
-      await send("Runtime.runIfWaitingForDebugger", {}, sessionId);
-    };
-    void configure().catch(() => undefined);
-  });
-  await send("Target.setAutoAttach", {
-    autoAttach: true,
-    waitForDebuggerOnStart: true,
-    flatten: true,
-  });
-  return {
-    async setRate(nextRate) {
-      rate = nextRate;
-      void workerSessions;
-      void rate;
-    },
-    async sampleWorkerHeap() {
-      const sessionId = [...workerSessions].at(-1);
-      if (sessionId === undefined) return null;
-      await send("HeapProfiler.collectGarbage", {}, sessionId).catch(
-        () => undefined,
-      );
-      return send("Runtime.getHeapUsage", {}, sessionId);
-    },
-    async close() {
-      socket.close();
-    },
-  };
-}
 
 declare global {
   interface Performance {
@@ -295,56 +190,132 @@ async function workerCalibration(page: Page): Promise<number> {
 async function calibrate(
   page: Page,
   session: Awaited<ReturnType<BrowserContext["newCDPSession"]>>,
-  workerThrottle: WorkerThrottleController,
+  workerThrottle: WorkerCdpController,
 ) {
   const page1: number[] = [];
   const page4: number[] = [];
   const worker1: number[] = [];
   const worker4: number[] = [];
+  let rate1Apply: WorkerThrottleApplySummary | null = null;
+  let rate4Apply: WorkerThrottleApplySummary | null = null;
   for (const rate of [1, 4] as const) {
+    await page.evaluate(
+      () =>
+        window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.terminateWorker(),
+    );
+    await workerThrottle.waitForWorkersDetached();
+    const attachCursor = workerThrottle.captureWorkerAttachCursor();
     await session.send("Emulation.setCPUThrottlingRate", { rate });
-    await workerThrottle.setRate(rate);
-    await page.evaluate(async () => {
-      const api = window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!;
-      await api.terminateWorker();
-      await api.recreateWorker();
-    });
-    await pageCalibration(page);
-    await workerCalibration(page);
-    for (let index = 0; index < 3; index += 1) {
-      (rate === 1 ? page1 : page4).push(await pageCalibration(page));
-      (rate === 1 ? worker1 : worker4).push(await workerCalibration(page));
+    const recreation = page.evaluate(
+      () => window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.recreateWorker(),
+    );
+    await Promise.all([
+      workerThrottle.waitForWorkerAfter(attachCursor).catch((error: unknown) => {
+        if (error instanceof WorkerCdpAttachmentTimeoutError) {
+          return null;
+        }
+        throw error;
+      }),
+      recreation,
+    ]);
+    const apply = await workerThrottle.setRate(rate);
+    assertWorkerThrottleApplySucceeded(apply, `rate ${rate} calibration`);
+    if (rate === 1) {
+      rate1Apply = apply;
+    } else {
+      rate4Apply = apply;
     }
+    const samples = await collectCalibrationSamples(
+      () => pageCalibration(page),
+      () => workerCalibration(page),
+    );
+    (rate === 1 ? page1 : page4).push(...samples.page);
+    (rate === 1 ? worker1 : worker4).push(...samples.worker);
+  }
+  if (rate1Apply === null || rate4Apply === null) {
+    throw new Error("Worker CPU calibration apply summaries are incomplete");
   }
   return {
     page: summarizeCalibration(page1, page4),
-    worker: summarizeCalibration(worker1, worker4),
+    worker: summarizeWorkerCalibration(
+      rate1Apply,
+      rate4Apply,
+      worker1,
+      worker4,
+    ),
   };
 }
 
-async function primaryMemory(page: Page) {
-  try {
-    const value = await page.evaluate(async () => {
-      if (performance.measureUserAgentSpecificMemory === undefined) {
-        throw new Error("measureUserAgentSpecificMemory unavailable");
+async function primaryMemory(
+  page: Page,
+  headless: boolean,
+  workerCrossOriginIsolated: boolean | null,
+) {
+  const observation = await page.evaluate(
+    async ({ isHeadless, workerIsolated }) => {
+      const permissionPolicyAllows = (() => {
+        try {
+          const policy = (
+            document as Document & {
+              readonly permissionsPolicy?: {
+                allowsFeature(feature: string): boolean;
+              };
+            }
+          ).permissionsPolicy;
+          return policy === undefined
+            ? null
+            : policy.allowsFeature("cross-origin-isolated");
+        } catch {
+          return null;
+        }
+      })();
+      const measure = performance.measureUserAgentSpecificMemory;
+      const diagnostics = {
+        api_present: measure !== undefined,
+        is_secure_context: isSecureContext,
+        window_cross_origin_isolated: window.crossOriginIsolated,
+        worker_cross_origin_isolated: workerIsolated,
+        permissions_policy_allows_cross_origin_isolated:
+          permissionPolicyAllows,
+        exception_name: null as string | null,
+        exception_message: null as string | null,
+        headless: isHeadless,
+      };
+      if (measure === undefined) {
+        return { value: null, diagnostics };
       }
-      return performance.measureUserAgentSpecificMemory();
-    });
-    return { sample: decodePrimaryMemory(value), error: null };
-  } catch (error) {
-    return {
-      sample: null,
-      error:
-        error instanceof Error
-          ? error.message.split(/\r?\n/u, 1)[0]!
-          : "memory sample failed",
-    };
-  }
+      try {
+        return {
+          value: await measure.call(performance),
+          diagnostics,
+        };
+      } catch (error) {
+        return {
+          value: null,
+          diagnostics: {
+            ...diagnostics,
+            exception_name:
+              error instanceof Error ? error.name : "UnknownError",
+            exception_message:
+              error instanceof Error ? error.message : "memory sample failed",
+          },
+        };
+      }
+    },
+    { isHeadless: headless, workerIsolated: workerCrossOriginIsolated },
+  );
+  return {
+    sample:
+      observation.value === null
+        ? null
+        : decodePrimaryMemory(observation.value),
+    diagnostics: decodePrimaryMemoryDiagnostics(observation.diagnostics),
+  };
 }
 
 async function supportingMemory(
   session: Awaited<ReturnType<BrowserContext["newCDPSession"]>>,
-  workerThrottle: WorkerThrottleController,
+  workerThrottle: WorkerCdpController,
 ) {
   const warnings: string[] = [];
   try {
@@ -352,26 +323,45 @@ async function supportingMemory(
   } catch (error) {
     warnings.push(
       `page garbage collection failed: ${
-        error instanceof Error
-          ? error.message.split(/\r?\n/u, 1)[0]
-          : "unknown"
+        sanitizeDiagnosticMessage(
+          error instanceof Error ? error.message : "unknown",
+        ) ?? "unknown"
       }`,
     );
   }
-  const pageHeap = decodeHeapUsage(await session.send("Runtime.getHeapUsage"));
-  const targets = await session.send("Target.getTargets");
-  const workerTarget = targets.targetInfos.find(
-    (target) =>
-      target.type === "worker" && target.title.includes("mhwilds-browser-solver"),
-  );
-  const rawWorkerHeap = await workerThrottle.sampleWorkerHeap();
-  if (workerTarget === undefined && rawWorkerHeap === null) {
-    warnings.push("dedicated Worker target was not exposed to the page CDP session");
+  let pageHeap: ReturnType<typeof decodeHeapUsage> | null = null;
+  try {
+    pageHeap = decodeHeapUsage(await session.send("Runtime.getHeapUsage"));
+  } catch (error) {
+    warnings.push(
+      `page heap unavailable: ${
+        sanitizeDiagnosticMessage(
+          error instanceof Error ? error.message : "unknown",
+        ) ?? "unknown"
+      }`,
+    );
+  }
+  let workerHeap: ReturnType<typeof decodeHeapUsage> | null = null;
+  try {
+    const rawWorkerHeap = await workerThrottle.sampleWorkerHeap();
+    if (rawWorkerHeap === null) {
+      warnings.push("dedicated Worker target was not attached");
+    } else {
+      workerHeap = decodeHeapUsage(rawWorkerHeap);
+    }
+  } catch (error) {
+    warnings.push(
+      `Worker heap unavailable: ${
+        sanitizeDiagnosticMessage(
+          error instanceof Error ? error.message : "unknown",
+        ) ?? "unknown"
+      }`,
+    );
   }
   return {
     page: pageHeap,
-    worker: rawWorkerHeap === null ? null : decodeHeapUsage(rawWorkerHeap),
-    worker_target_id: workerTarget?.targetId ?? null,
+    worker: workerHeap,
+    worker_attached: workerHeap !== null,
     warnings,
   };
 }
@@ -380,11 +370,21 @@ async function sampleMemory(
   name: string,
   page: Page,
   session: Awaited<ReturnType<BrowserContext["newCDPSession"]>>,
-  workerThrottle: WorkerThrottleController,
+  workerThrottle: WorkerCdpController,
+  headless: boolean,
 ) {
+  const workerCrossOriginIsolated = await page.evaluate(
+    () =>
+      window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__?.getState()
+        .worker_cross_origin_isolated ?? null,
+  );
   return {
     name,
-    primary: await primaryMemory(page),
+    primary: await primaryMemory(
+      page,
+      headless,
+      workerCrossOriginIsolated,
+    ),
     cdp: await supportingMemory(session, workerThrottle),
   };
 }
@@ -395,14 +395,16 @@ function mixed(report: BrowserBenchmarkReport): BrowserBenchmarkCaseReport {
   return result;
 }
 
-function reportCounts(reports: readonly BrowserBenchmarkReport[]) {
-  const cases = reports.flatMap((report) => report.cases);
-  return {
-    parityFailures: cases.filter(({ parity }) => parity !== true).length,
-    nondeterministicCases: cases.filter(({ deterministic }) => !deterministic).length,
-    timeouts: cases.filter(({ result }) => result.status === "timed-out").length,
-    invalidCandidates: 0,
-  };
+function strictlyIncreasing(values: readonly (number | null)[]): boolean {
+  return (
+    values.length > 1 &&
+    values.every(
+      (value, index) =>
+        value !== null &&
+        (index === 0 ||
+          (values[index - 1] !== null && value > values[index - 1]!)),
+    )
+  );
 }
 
 async function runCertification(args: CertificationArguments): Promise<unknown> {
@@ -412,9 +414,7 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
     readFile(args.oracle, "utf8"),
     sha256(args.catalog),
   ]);
-  const catalog = JSON.parse(catalogRaw) as {
-    source_catalog: { sha256: string };
-  };
+  const catalog = decodeBrowserSearchCatalog(JSON.parse(catalogRaw) as unknown);
   const oracle = JSON.parse(oracleRaw) as { cases: readonly unknown[] };
   process.env.MHWILDS_BROWSER_SOLVER_CATALOG = args.catalog;
   process.env.MHWILDS_BROWSER_SOLVER_ORACLE = args.oracle;
@@ -424,7 +424,7 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
     server: { host: "127.0.0.1", port: 0, strictPort: false },
   });
   let browser: Browser | null = null;
-  let workerThrottle: WorkerThrottleController | null = null;
+  let workerThrottle: WorkerCdpController | null = null;
   try {
     await server.listen();
     const address = server.httpServer?.address();
@@ -433,14 +433,15 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
     }
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const cdpPort = await availablePort();
+    const headless = !args.headed;
     browser = await chromium.launch({
-      headless: !args.headed,
+      headless,
       args: [
         "--enable-precise-memory-info",
         `--remote-debugging-port=${cdpPort}`,
       ],
     });
-    workerThrottle = await createWorkerThrottleController(cdpPort, 1);
+    workerThrottle = await createWorkerCdpController({ port: cdpPort });
     const browserVersion = browser.version();
     const errors: string[] = [];
     const crashes: string[] = [];
@@ -467,6 +468,7 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
       () => window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.getState(),
     );
     await calibrationProfile.context.close();
+    await workerThrottle.waitForWorkersDetached();
 
     const desktopReports: BrowserBenchmarkReport[] = [];
     const desktopTotals: number[] = [];
@@ -497,6 +499,7 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
         });
       }
       await profile.context.close();
+      await workerThrottle.waitForWorkersDetached();
     }
 
     const mobileReports: BrowserBenchmarkReport[] = [];
@@ -526,6 +529,7 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
         });
       }
       await profile.context.close();
+      await workerThrottle.waitForWorkersDetached();
     }
 
     const memoryContext = await browser.newContext({
@@ -543,12 +547,24 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
       `${baseUrl}/solver-benchmark.html?certification-blank=1`,
     );
     const stages = [
-      await sampleMemory("baseline", memoryPage, memorySession, workerThrottle),
+      await sampleMemory(
+        "baseline",
+        memoryPage,
+        memorySession,
+        workerThrottle,
+        headless,
+      ),
     ];
     await memoryPage.goto(`${baseUrl}/solver-benchmark.html?certification=1`);
     await bridge(memoryPage);
     stages.push(
-      await sampleMemory("worker-init", memoryPage, memorySession, workerThrottle),
+      await sampleMemory(
+        "worker-init",
+        memoryPage,
+        memorySession,
+        workerThrottle,
+        headless,
+      ),
     );
     await memoryPage.evaluate((timeoutMs) =>
       window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.runCase({
@@ -562,6 +578,7 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
         memoryPage,
         memorySession,
         workerThrottle,
+        headless,
       ),
     );
     await memoryPage.evaluate((timeoutMs) =>
@@ -570,21 +587,33 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
         timeout_ms: timeoutMs,
       }), args.timeoutMs);
     stages.push(
-      await sampleMemory("full-suite", memoryPage, memorySession, workerThrottle),
+      await sampleMemory(
+        "full-suite",
+        memoryPage,
+        memorySession,
+        workerThrottle,
+        headless,
+      ),
     );
     await memoryPage.evaluate(() =>
       window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.terminateWorker(),
     );
+    await workerThrottle.waitForWorkersDetached();
     stages.push(
       await sampleMemory(
         "post-terminate",
         memoryPage,
         memorySession,
         workerThrottle,
+        headless,
       ),
     );
-    const retention: unknown[] = [];
-    for (let cycle = 1; cycle <= 5; cycle += 1) {
+    const retention: Array<Awaited<ReturnType<typeof sampleMemory>>> = [];
+    for (
+      let cycle = 1;
+      cycle <= CDP_FALLBACK_RETENTION_CYCLES;
+      cycle += 1
+    ) {
       await memoryPage.evaluate(() =>
         window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.recreateWorker(),
       );
@@ -597,16 +626,18 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
       await memoryPage.evaluate(() =>
         window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.terminateWorker(),
       );
+      await workerThrottle.waitForWorkersDetached();
       retention.push(
         await sampleMemory(
           `retention-${cycle}-post-terminate`,
           memoryPage,
           memorySession,
           workerThrottle,
+          headless,
         ),
       );
     }
-    stages.push(retention[retention.length - 1] as Awaited<ReturnType<typeof sampleMemory>>);
+    stages.push(retention[retention.length - 1]!);
 
     await memoryPage.evaluate(() =>
       window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.recreateWorker(),
@@ -633,6 +664,7 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
     await memoryPage.evaluate(() =>
       window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.terminateWorker(),
     );
+    await workerThrottle.waitForWorkersDetached();
     await memoryPage.evaluate(() =>
       window.__MHWILDS_BROWSER_SOLVER_CERTIFICATION__!.recreateWorker(),
     );
@@ -652,8 +684,15 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
       memoryPage,
       memorySession,
       workerThrottle,
+      headless,
+    );
+    const finalWorkerHealth = await workerThrottle.setRate(4);
+    assertWorkerThrottleApplySucceeded(
+      finalWorkerHealth,
+      "cancel/restart health check",
     );
     await memoryContext.close();
+    await workerThrottle.waitForWorkersDetached();
 
     const desktopMixed = desktopReports.map(
       (report) => mixed(report).timings_ms.median,
@@ -663,23 +702,87 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
     );
     const primaryBytes = (name: string): number | null =>
       stages.find((stage) => stage.name === name)?.primary.sample?.bytes ?? null;
-    const retentionSamples = retention as Array<
-      Awaited<ReturnType<typeof sampleMemory>>
-    >;
+    const retentionSamples = retention;
     const firstRetention = retentionSamples[0]?.primary.sample?.bytes ?? null;
     const finalRetention =
       retentionSamples[retentionSamples.length - 1]?.primary.sample?.bytes ?? null;
-    const allCounts = reportCounts([...desktopReports, ...mobileReports]);
+    const primaryRetentionValues = retentionSamples.map(
+      (sample) => sample.primary.sample?.bytes ?? null,
+    );
+    const allMemorySamples = [
+      ...stages,
+      ...retentionSamples,
+      retainedAfterCancel,
+    ];
+    const primaryMemoryAvailable = allMemorySamples.every(
+      (sample) => sample.primary.sample !== null,
+    );
+    const unavailablePrimaryDiagnostics = allMemorySamples.flatMap((sample) =>
+      sample.primary.sample === null ? [sample.primary.diagnostics] : [],
+    );
+    const primaryFallbackEligible =
+      !primaryMemoryAvailable &&
+      primaryMemoryFallbackEligible(unavailablePrimaryDiagnostics);
+    const verifiedPrimaryMemoryPeak = verifiedPrimaryMemoryPeakBytes(
+      allMemorySamples.map((sample) => sample.primary.sample),
+    );
+    const cdpMemoryPeak = cdpHeapPeakBytes([
+      ...stages.map((stage) => ({
+        page: stage.cdp.page,
+        worker: stage.cdp.worker,
+        worker_required:
+          stage.name === "worker-init" ||
+          stage.name === "post-mixed-ranked" ||
+          stage.name === "full-suite",
+      })),
+      ...retentionSamples.map((sample) => ({
+        page: sample.cdp.page,
+        worker: sample.cdp.worker,
+        worker_required: false,
+      })),
+      {
+        page: retainedAfterCancel.cdp.page,
+        worker: retainedAfterCancel.cdp.worker,
+        worker_required: true,
+      },
+    ]);
+    const cdpRetentionValues = retentionSamples.map(
+      (sample) => sample.cdp.page?.used_size ?? null,
+    );
+    const firstCdpRetention = cdpRetentionValues[0] ?? null;
+    const finalCdpRetention =
+      cdpRetentionValues[cdpRetentionValues.length - 1] ?? null;
+    const allCounts = summarizeCertificationEvidence(
+      [desktopReports, mobileReports],
+      [restartCase],
+      (request, result) =>
+        validateBrowserSolverResult(catalog, request, result),
+    );
+    const mobileAcceptanceTimeouts = mobileCases.filter(
+      ({ result }) => result.status === "timed-out",
+    ).length;
+    const browserMemoryExhaustion = memoryExhaustionObserved([
+      ...errors,
+      ...crashes,
+      ...allMemorySamples.flatMap(({ primary }) => [
+        primary.diagnostics.exception_name,
+        primary.diagnostics.exception_message,
+      ]),
+    ]);
     const decision = decideCertification({
       workerCalibration: cpuCalibration.worker,
       desktopMixedMs: desktopMixed,
       mobileCaseMediansMs: mobileCases.map(({ timings_ms }) => timings_ms.median),
       mobileCaseMaxMs: mobileCases.map(({ timings_ms }) => timings_ms.max),
+      mobileAcceptanceCaseCount: mobileCases.length,
+      mobileAcceptanceTimeouts,
       workerInitMedianMs: statistics(mobileWorkerInit).median,
       ...allCounts,
       errors: errors.length,
       tabCrashes: crashes.length,
-      primaryMemoryAvailable: stages.every((stage) => stage.primary.sample !== null),
+      browserMemoryExhaustion,
+      primaryMemoryAvailable,
+      primaryMemoryFallbackEligible: primaryFallbackEligible,
       postMixedBytes: primaryBytes("post-mixed-ranked"),
       fullSuitePeakBytes: primaryBytes("full-suite"),
       postInitIncrementBytes:
@@ -688,12 +791,18 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
           : null,
       firstPostTerminateBytes: firstRetention,
       finalPostTerminateBytes: finalRetention,
-      retentionContinuouslyIncreasing: retentionSamples.every(
-        (sample, index) =>
-          index === 0 ||
-          (sample.primary.sample?.bytes ?? -1) >
-            (retentionSamples[index - 1]?.primary.sample?.bytes ?? Infinity),
+      retentionContinuouslyIncreasing: strictlyIncreasing(
+        primaryRetentionValues,
       ),
+      cdpMemoryStagesComplete: cdpMemoryPeak !== null,
+      cdpMemoryPeakBytes: cdpMemoryPeak,
+      cdpRetentionCycleCount: retentionSamples.length,
+      cdpFirstPostTerminatePageBytes: firstCdpRetention,
+      cdpFinalPostTerminatePageBytes: finalCdpRetention,
+      cdpRetentionContinuouslyIncreasing:
+        strictlyIncreasing(cdpRetentionValues),
+      verifiedTotalMemoryPeakBytes:
+        verifiedPrimaryMemoryPeak,
       cancelRestartPassed:
         cancelProgress !== null &&
         restartCase.result.status === "optimal" &&
@@ -702,7 +811,7 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
     const { stdout: commitSha } = await execFileAsync("git", ["rev-parse", "HEAD"]);
     const { stdout: gitStatus } = await execFileAsync("git", ["status", "--porcelain"]);
     return {
-      format_version: 1,
+      format_version: 2,
       source: {
         commit_sha: commitSha.trim(),
         git_dirty: gitStatus.trim().length > 0,
@@ -722,17 +831,15 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
           await readFile(resolve(process.cwd(), "node_modules/playwright/package.json"), "utf8"),
         ).version,
         chromium_version: browserVersion,
-        headless: !args.headed,
+        headless,
       },
       cpu_calibration: {
-        ...cpuCalibration,
+        page: cpuCalibration.page,
+        worker: cpuCalibration.worker,
         page_cross_origin_isolated: calibrationState.cross_origin_isolated,
         worker_cross_origin_isolated:
           calibrationState.worker_cross_origin_isolated,
-        cpu_throttle_verified:
-          cpuCalibration.worker.rate_ratio !== null &&
-          cpuCalibration.worker.rate_ratio >= 2.5 &&
-          cpuCalibration.worker.rate_ratio <= 6.5,
+        cpu_throttle_verified: cpuCalibration.worker.verified,
       },
       desktop: {
         profile: "desktop 1x",
@@ -742,14 +849,31 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
         worker_init_ms: statistics(desktopWorkerInit),
       },
       mobile_4x: {
-        profile: "headless Chromium low-speed mobile-equivalent 4x profile; not a real device",
+        profile: `${headless ? "headless" : "headed"} Chromium requested low-speed mobile-equivalent 4x profile; not a real device`,
         suites: mobileReports,
         worker_init_ms: statistics(mobileWorkerInit),
+        acceptance_case_count: mobileCases.length,
+        acceptance_timeout_count: mobileAcceptanceTimeouts,
       },
       memory: {
         method: "measureUserAgentSpecificMemory",
+        primary: {
+          all_samples_available: primaryMemoryAvailable,
+          cdp_fallback_eligible: primaryFallbackEligible,
+          verified_peak_bytes: verifiedPrimaryMemoryPeak,
+        },
         stages,
         retention_cycles: retention,
+        headed_retry: {
+          status: headless ? "not-attempted" : "primary-run-was-headed",
+        },
+        cdp_fallback: {
+          stages_complete: cdpMemoryPeak !== null,
+          peak_combined_used_bytes: cdpMemoryPeak,
+          retention_cycle_count: retentionSamples.length,
+          first_post_terminate_page_used_bytes: firstCdpRetention,
+          final_post_terminate_page_used_bytes: finalCdpRetention,
+        },
       },
       cancel_restart: {
         passed:
@@ -761,9 +885,15 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
         restart_case: restartCase,
         retained_memory: retainedAfterCancel,
       },
+      evidence_counts: allCounts,
       decision: {
         ...decision,
-        diagnostics: { console_page_errors: errors, tab_crashes: crashes, request_failures: requestsFailed },
+        diagnostics: {
+          console_page_errors: errors,
+          tab_crashes: crashes,
+          request_failures: requestsFailed,
+          browser_memory_exhaustion: browserMemoryExhaustion,
+        },
       },
     };
   } finally {
@@ -775,17 +905,30 @@ async function runCertification(args: CertificationArguments): Promise<unknown> 
 
 export async function executeCertificationCli(
   argv: readonly string[],
-  cwd = process.env.INIT_CWD ?? process.cwd(),
+  cwd = process.cwd(),
+  dependencies: {
+    readonly run: (args: CertificationArguments) => Promise<unknown>;
+    readonly write: (path: string, value: unknown) => Promise<void>;
+    readonly stdout: (value: string) => void;
+    readonly stderr: (value: string) => void;
+  } = {
+    run: runCertification,
+    write: atomicJson,
+    stdout: (value) => process.stdout.write(value),
+    stderr: (value) => process.stderr.write(value),
+  },
 ): Promise<number> {
   try {
     const args = resolvedArguments(parseCertificationArguments(argv), cwd);
     await mkdir(args.screenshotDirectory, { recursive: true });
-    const report = await runCertification(args);
-    await atomicJson(args.output, report);
-    process.stdout.write(`${JSON.stringify({ output: args.output, decision: (report as { decision: { status: string } }).decision.status })}\n`);
+    const report = await dependencies.run(args);
+    await dependencies.write(args.output, report);
+    dependencies.stdout(
+      `${JSON.stringify({ output: args.output, decision: (report as { decision: { status: string } }).decision.status })}\n`,
+    );
     return 0;
   } catch (error) {
-    process.stderr.write(
+    dependencies.stderr(
       `browser solver certification failed: ${error instanceof Error ? error.message : "unknown error"}\n`,
     );
     return 1;
