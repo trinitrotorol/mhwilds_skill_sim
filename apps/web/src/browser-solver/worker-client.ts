@@ -84,7 +84,12 @@ function asWorkerResponse(value: unknown): BrowserSolverWorkerResponse | null {
 function errorFromResponse(
   response: BrowserSolverWorkerErrorResponse,
 ): Error {
-  return new Error(response.message);
+  const message = response.code === "search-limit"
+    ? "探索条件が広すぎるため、安全な処理上限に達しました。武器種・必須スキルを指定するか、所持品モードで候補を絞って再検索してください。候補なしという判定ではありません。"
+    : response.message;
+  const error = Object.assign(new Error(message), { code: response.code });
+  if (response.code === "search-limit") error.name = "BrowserSearchLimitError";
+  return error;
 }
 
 function cancelledResult(elapsedMs: number): BrowserSolverResult {

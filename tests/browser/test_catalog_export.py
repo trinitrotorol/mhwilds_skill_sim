@@ -37,6 +37,7 @@ def test_export_signature_is_keyword_only() -> None:
         "catalog",
         "source_catalog_sha256",
         "maximum_expanded_equipment",
+        "include_generated_appraisal_charms",
     )
     assert all(
         parameter.kind is inspect.Parameter.KEYWORD_ONLY
@@ -59,6 +60,8 @@ def test_tiny_export_has_exact_order_indexes_and_generated_candidates(
         "skills",
         "equipment_by_part",
         "decorations",
+        "appraisal_charm_skill_groups",
+        "appraisal_charm_patterns",
     ]
     assert list(value["source_catalog"]) == [  # type: ignore[arg-type]
         "schema_version",
@@ -73,8 +76,8 @@ def test_tiny_export_has_exact_order_indexes_and_generated_candidates(
         "schema_version": 1,
         "sha256": tiny_sha256,
         "source_equipment_count": 9,
-        "generated_appraisal_charm_count": 8,
-        "expanded_equipment_count": 17,
+        "generated_appraisal_charm_count": 7,
+        "expanded_equipment_count": 16,
         "decoration_count": 5,
         "skill_count": 6,
     }
@@ -94,7 +97,7 @@ def test_tiny_export_has_exact_order_indexes_and_generated_candidates(
         for part_variants in equipment_by_part.values()
         for variant in part_variants
     ]
-    assert [variant["variant_id"] for variant in variants] == list(range(17))
+    assert [variant["variant_id"] for variant in variants] == list(range(16))
     assert [variant["equipment_id"] for variant in equipment_by_part["charm"]][:2] == [
         "fixture:charm:power",
         "fixture:charm:precision",
@@ -213,13 +216,13 @@ def test_preflight_stops_before_expansion_limit(
         build_browser_search_catalog(
             catalog=tiny_catalog,
             source_catalog_sha256=tiny_sha256,
-            maximum_expanded_equipment=16,
+            maximum_expanded_equipment=15,
         )
 
-    assert error_info.value.estimated_count == 17
-    assert error_info.value.maximum_count == 16
-    assert "17" in str(error_info.value)
+    assert error_info.value.estimated_count == 16
+    assert error_info.value.maximum_count == 15
     assert "16" in str(error_info.value)
+    assert "15" in str(error_info.value)
 
 
 def test_artian_variants_keep_distinct_ids_for_same_equipment_id(

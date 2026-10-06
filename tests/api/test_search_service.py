@@ -799,7 +799,7 @@ def test_generated_weapon_skill_payload_exposes_charm_and_artian_details() -> No
     assert not response_contains_unserializable_value(response)
 
 
-def test_duplicate_skill_aggregation_route_is_visible_through_api() -> None:
+def test_duplicate_base_skill_aggregation_is_never_returned_through_api() -> None:
     response = search_catalog_build_candidates_from_payload(
         catalog=tiny_catalog(),
         payload=payload(
@@ -824,12 +824,7 @@ def test_duplicate_skill_aggregation_route_is_visible_through_api() -> None:
         ):
             aggregated_charms.append(charm)
 
-    assert aggregated_charms
-    assert all(
-        charm["skills"][0]  # type: ignore[index]
-        == {"skill_id": "skill:attack-boost", "level": 3}
-        for charm in aggregated_charms
-    )
+    assert not aggregated_charms
     assert len(candidates) == 1000
     assert response["total_count"] > len(candidates)  # type: ignore[operator]
     assert response["truncated"] is True

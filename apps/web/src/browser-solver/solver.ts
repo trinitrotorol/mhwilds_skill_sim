@@ -30,6 +30,8 @@ import {
   equipmentVariantToResponse,
   validateBrowserSolverResult,
 } from "./validation";
+import { applyInventoryToCatalog } from "./inventory";
+import { BrowserSearchLimitError, prepareQueryAppraisals } from "./appraisal-query";
 
 export const SEARCH_CONTROL_CHECK_INTERVAL = 1_024;
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -656,7 +658,7 @@ function buildCandidate(
 /**
  * Exact top-1 ranked search over the already-expanded compact Catalog.
  */
-export function solveBrowserRankedSearch(
+function solveTopOne(
   catalog: DecodedBrowserCatalog,
   requestValue: BrowserRankedSearchRequest,
   optionsValue: BrowserSolverOptions = {},
@@ -736,7 +738,8 @@ export function solveBrowserRankedSearch(
     return finish("infeasible");
   }
   const bonusProjection = createBonusProjection(catalog, projection);
-  const decorationProjection = createDecorationProjection(catalog, projection);
+  const decorationProjection = createDecorationProjection(catalog, projection,
+    request.inventory === undefined ? undefined : new Map(request.inventory.decorations.map((entry) => [entry.decoration_id, entry.quantity])));
   const candidatesByPart = preparePartCandidates(
     catalog,
     request,
@@ -784,6 +787,7 @@ export function solveBrowserRankedSearch(
     () => new Set<string>(),
   );
   const decorationCache = new Map<string, DecorationSolution | null>();
+  let seenStateCount = 0;
   let provenGlobalOptimum = false;
 
   const visit = (depth: number): void => {
@@ -808,7 +812,9 @@ export function solveBrowserRankedSearch(
       counters.pruned_nodes = incrementCounter(counters.pruned_nodes);
       return;
     }
+    if (seenStateCount >= 100_000) throw new BrowserSearchLimitError();
     seen.add(key);
+    seenStateCount += 1;
 
     const upperLevels = upperBoundLevels(
       depth,
@@ -871,6 +877,7 @@ export function solveBrowserRankedSearch(
           return;
         }
         solution = outcome.solution;
+        if (decorationCache.size >= 50_000) throw new BrowserSearchLimitError();
         decorationCache.set(decorationKey, solution);
       }
       if (solution === null || solution === undefined) {
@@ -938,4 +945,107 @@ export function solveBrowserRankedSearch(
 
   visit(0);
   return finish(incumbent === null ? "infeasible" : "optimal");
+}
+
+interface SearchPartition {
+  readonly catalog: DecodedBrowserCatalog;
+  readonly prefix: number;
+  readonly result: BrowserSolverResult;
+}
+
+function compareResults(left: BrowserSolverResult, right: BrowserSolverResult): number {
+  const objective = (result: BrowserSolverResult): SearchObjective => ({
+    preference_score: result.preference_score ?? -1,
+    decoration_count: result.decoration_count ?? Number.MAX_SAFE_INTEGER,
+    selected_variant_ids: result.selected_variant_ids,
+    decoration_indices: [],
+    decoration_id_ranks: [],
+  });
+  return compareSearchObjectives(objective(left), objective(right));
+}
+
+/**
+ * K best distinct equipment selections by disjoint prefix partitions (Lawler).
+ * Each partition uses the independently validated exact top-one solver, so its
+ * dominance and projected-state reductions never discard another K-best build.
+ * Equipment combinations are visited lazily. Every solve shares one deadline.
+ */
+export function solveBrowserRankedSearch(
+  catalogValue: DecodedBrowserCatalog,
+  requestValue: BrowserRankedSearchRequest,
+  optionsValue: BrowserSolverOptions = {},
+): BrowserSolverResult {
+  const request = decodeBrowserRankedSearchRequest(requestValue);
+  if (request.max_results === 1 && request.inventory === undefined && catalogValue.theoretical_appraisal_mode !== "query") {
+    return solveTopOne(catalogValue, request, optionsValue);
+  }
+  const options = validateOptions(optionsValue);
+  const started = readClock(options.now);
+  const elapsed = () => Math.max(0, readClock(options.now) - started);
+  const prepared = request.inventory === undefined ? prepareQueryAppraisals(catalogValue, request, () => options.shouldCancel() || elapsed() >= options.timeoutMs) : { catalog: applyInventoryToCatalog(catalogValue, request.inventory), interrupted: false };
+  const catalog = prepared.catalog;
+  if (prepared.interrupted) {
+    const cancelled = options.shouldCancel();
+    const result: BrowserSolverResult = { status: cancelled ? "cancelled" : "timed-out", candidate: null, selected_variant_ids: [], preference_score: null, decoration_count: null, candidates: [], selected_variant_ids_by_candidate: [], exhausted: false, timed_out: !cancelled, elapsed_ms: elapsed(), visited_nodes: 0, pruned_nodes: 0, complete_equipment_selections: 0 };
+    validateBrowserSolverResult(catalogValue, request, result);
+    return result;
+  }
+  const counters = { visited_nodes: 0, pruned_nodes: 0, complete_equipment_selections: 0 };
+  const oneRequest = { ...request, max_results: 1 };
+  const run = (subset: DecodedBrowserCatalog): BrowserSolverResult => {
+    const result = solveTopOne(subset, oneRequest, {
+      ...options,
+      timeoutMs: Math.max(0, options.timeoutMs - elapsed()),
+      onProgress: (progress) => options.onProgress?.({ ...progress, elapsed_ms: elapsed(), visited_nodes: counters.visited_nodes + progress.visited_nodes, pruned_nodes: counters.pruned_nodes + progress.pruned_nodes, complete_equipment_selections: counters.complete_equipment_selections + progress.complete_equipment_selections }),
+    });
+    counters.visited_nodes += result.visited_nodes;
+    counters.pruned_nodes += result.pruned_nodes;
+    counters.complete_equipment_selections += result.complete_equipment_selections;
+    return result;
+  };
+  const initial = run(catalog);
+  const frontier: SearchPartition[] = initial.candidate ? [{ catalog, prefix: 0, result: initial }] : [];
+  const accepted: BrowserSolverResult[] = [];
+  let interrupted: "timed-out" | "cancelled" | null = initial.status === "timed-out" || initial.status === "cancelled" ? initial.status : null;
+  let exhausted = initial.status === "infeasible";
+  while (frontier.length > 0 && interrupted === null) {
+    frontier.sort((left, right) => compareResults(left.result, right.result));
+    const partition = frontier.shift()!;
+    accepted.push(partition.result);
+    if (accepted.length >= request.max_results) break;
+    for (let depth = partition.prefix; depth < EQUIPMENT_PARTS.length; depth += 1) {
+      if (options.shouldCancel()) { interrupted = "cancelled"; break; }
+      if (elapsed() >= options.timeoutMs) { interrupted = "timed-out"; break; }
+      const byPart = { ...partition.catalog.indexed.equipment_by_part };
+      for (let fixed = partition.prefix; fixed < depth; fixed += 1) {
+        const part = EQUIPMENT_PARTS[fixed]!;
+        const id = partition.result.selected_variant_ids[fixed];
+        byPart[part] = byPart[part].filter((item) => item.definition.variant_id === id);
+      }
+      const part = EQUIPMENT_PARTS[depth]!;
+      byPart[part] = byPart[part].filter((item) => item.definition.variant_id !== partition.result.selected_variant_ids[depth]);
+      if (byPart[part].length === 0) continue;
+      const subset: DecodedBrowserCatalog = { ...catalog, indexed: { ...catalog.indexed, equipment_by_part: byPart } };
+      const result = run(subset);
+      if (result.candidate) frontier.push({ catalog: subset, prefix: depth, result });
+      if (result.status === "timed-out" || result.status === "cancelled") { interrupted = result.status; break; }
+    }
+    if (frontier.length === 0 && interrupted === null) exhausted = true;
+  }
+  const found = [...accepted, ...(interrupted === null ? [] : frontier.map((entry) => entry.result))]
+    .sort(compareResults).slice(0, request.max_results);
+  const best = found[0];
+  const status = interrupted ?? (found.length ? "optimal" : "infeasible");
+  const result: BrowserSolverResult = {
+    status, candidate: best?.candidate ?? null,
+    selected_variant_ids: best?.selected_variant_ids ?? [],
+    preference_score: best?.preference_score ?? null,
+    decoration_count: best?.decoration_count ?? null,
+    elapsed_ms: elapsed(), ...counters,
+    candidates: found.map((entry) => entry.candidate!),
+    selected_variant_ids_by_candidate: found.map((entry) => entry.selected_variant_ids),
+    exhausted, timed_out: interrupted === "timed-out",
+  };
+  validateBrowserSolverResult(catalogValue, request, result);
+  return result;
 }

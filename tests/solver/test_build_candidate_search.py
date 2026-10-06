@@ -1203,7 +1203,7 @@ def test_generated_charm_satisfies_weapon_skill_requirement() -> None:
     assert dict(result[0].skill_levels)["skill:weapon-technique"] == 1
 
 
-def test_summed_duplicate_charm_skills_satisfy_higher_requirement() -> None:
+def test_duplicate_base_charm_skills_cannot_satisfy_higher_requirement() -> None:
     groups = (
         appraisal_skill_group(
             "appraisal-group:B",
@@ -1228,8 +1228,7 @@ def test_summed_duplicate_charm_skills_satisfy_higher_requirement() -> None:
         ),
     )
 
-    assert len(result) == 1
-    assert result[0].equipment[-1].skills == (skill("skill:attack-boost", 3),)
+    assert result == ()
 
 
 def test_simultaneous_requirements_select_correct_generated_charm() -> None:

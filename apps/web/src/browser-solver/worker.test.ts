@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { BrowserSearchLimitError } from "./appraisal-query";
 
 import type { BrowserSolverWorkerResponse } from "./protocol";
 import type {
@@ -172,6 +173,22 @@ describe("browser solver worker runtime", () => {
       search_id: "timeout",
       result: expected,
     });
+  });
+
+  it("reports a bounded working-set limit separately from no solution", async () => {
+    const responses: BrowserSolverWorkerResponse[] = [];
+    const runtime = createBrowserSolverWorkerRuntime(
+      (response) => responses.push(response),
+      {
+        decodeCatalog: () => CATALOG,
+        solve: () => { throw new BrowserSearchLimitError(); },
+        yieldBeforeSearch: () => Promise.resolve(),
+      },
+    );
+    await runtime.handleMessage(initMessage());
+    await runtime.handleMessage(searchMessage("limited"));
+    expect(responses.at(-1)).toMatchObject({ type: "error", code: "search-limit", search_id: "limited" });
+    expect(responses.some((response) => response.type === "result")).toBe(false);
   });
 
   it("rejects a duplicate active search ID", async () => {

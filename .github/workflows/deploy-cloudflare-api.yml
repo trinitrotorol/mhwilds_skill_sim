@@ -18,10 +18,13 @@ jobs:
       API_BASE_URL: https://trinitrotorol.com/game-guide/mhwilds-skill-sim/api
       API_IMAGE: mhwilds-skill-sim-api:task065
       API_CONTAINER: mhwilds-skill-sim-api-task065
+      MHWILDS_INVENTORY_CONTRACT_PATH: ${{ github.workspace }}/subprojects/inventory-checker/contracts/search-inventory.v1.schema.json
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5

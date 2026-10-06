@@ -72,7 +72,7 @@ def test_merge_files_writes_loadable_catalog_with_expected_counts(
     assert len(catalog.appraisal_charm_skill_groups) == 3
     assert len(catalog.appraisal_charm_patterns) == 10
     assert tmp_path.resolve() in output.resolve().parents
-    assert ROOT.resolve() not in output.resolve().parents
+    assert FIXTURE_DIRECTORY.resolve() not in output.resolve().parents
 
 
 def test_merge_files_writes_unicode_indentation_and_one_lf_newline(

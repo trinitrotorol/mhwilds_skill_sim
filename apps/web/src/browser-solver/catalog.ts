@@ -1,3 +1,4 @@
+import { decodeAppraisalRules } from "./inventory";
 import {
   EQUIPMENT_PARTS,
   SKILL_KINDS,
@@ -627,12 +628,22 @@ export function decodeBrowserSearchCatalog(
   value: unknown,
 ): DecodedBrowserCatalog {
   const object = asPlainObject(value, "$");
-  assertExactKeys(object, TOP_LEVEL_KEYS, "$");
+  const hasRules = Object.hasOwn(object, "appraisal_charm_skill_groups") || Object.hasOwn(object, "appraisal_charm_patterns");
+  const extraKeys = [...(hasRules ? ["appraisal_charm_skill_groups", "appraisal_charm_patterns"] : []), ...(Object.hasOwn(object, "theoretical_appraisal_mode") ? ["theoretical_appraisal_mode"] : [])];
+  assertExactKeys(object, [...TOP_LEVEL_KEYS, ...extraKeys], "$");
+  if (Object.hasOwn(object, "theoretical_appraisal_mode") && (object.theoretical_appraisal_mode !== "query" || !hasRules)) fail("$.theoretical_appraisal_mode", "query mode requires appraisal rules");
+  const appraisalRules = hasRules ? decodeAppraisalRules({ appraisal_charm_skill_groups: object.appraisal_charm_skill_groups, appraisal_charm_patterns: object.appraisal_charm_patterns }) : undefined;
   if (object.format_version !== 1) {
     fail("$.format_version", "expected exact format version 1");
   }
   const source = decodeSource(object.source_catalog);
   const skills = decodeSkills(object.skills);
+  for (const group of appraisalRules?.appraisal_charm_skill_groups ?? []) {
+    for (const contribution of group.skills) {
+      const skill = skills.find((entry) => entry.skill_id === contribution.skill_id);
+      if (!skill || !["armor", "weapon"].includes(skill.kind) || contribution.level > skill.max_level) fail("$.appraisal_charm_skill_groups", "invalid appraisal skill reference");
+    }
+  }
   const skillIndexById = new Map<string, number>(
     skills.map((skill, index) => [skill.skill_id, index]),
   );
@@ -676,5 +687,7 @@ export function decodeBrowserSearchCatalog(
     equipment_by_part: equipment.raw,
     decorations: decorations.raw,
     indexed: indexes,
+    ...(appraisalRules === undefined ? {} : { appraisal_rules: appraisalRules }),
+    ...(object.theoretical_appraisal_mode === "query" ? { theoretical_appraisal_mode: "query" as const } : {}),
   });
 }

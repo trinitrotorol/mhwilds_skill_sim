@@ -1,11 +1,11 @@
 .PHONY: test lint data-check
 
 test:
-	python -m pytest
+	sh scripts/pyw -m pytest --capture=sys
 
 lint:
-	python -m ruff check .
-	python -m ruff format --check .
+	sh scripts/pyw -m ruff check .
+	sh scripts/pyw -m ruff format --check .
 
 data-check:
-	python -m scripts.check_data
+	sh scripts/pyw -m scripts.check_data

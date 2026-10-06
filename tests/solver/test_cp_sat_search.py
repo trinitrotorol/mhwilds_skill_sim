@@ -234,11 +234,12 @@ def requirement_generator() -> Iterator[SkillRequirement]:
     yield requirement("skill:test")
 
 
-def test_runtime_dependencies_add_only_exact_ortools_requirement() -> None:
+def test_runtime_dependencies_include_pinned_inventory_contract_validator() -> None:
     with (PROJECT_ROOT / "pyproject.toml").open("rb") as file:
         project = tomllib.load(file)["project"]
 
     assert project["dependencies"] == [
+        "jsonschema==4.26.0",
         "fastapi>=0.115,<1",
         "ortools>=9.15,<10",
         "uvicorn>=0.51,<1",
@@ -1258,7 +1259,7 @@ def test_generated_appraisal_charm_can_satisfy_requirement() -> None:
     )
 
 
-def test_repeated_selected_appraisal_skill_is_aggregated_once() -> None:
+def test_repeated_base_skill_cannot_generate_an_appraisal_charm() -> None:
     skill_id = "skill:repeated-appraisal"
     group = appraisal_group(
         "appraisal-group:repeat",
@@ -1276,10 +1277,7 @@ def test_repeated_selected_appraisal_skill_is_aggregated_once() -> None:
 
     candidate = solve(catalog, (requirement(skill_id, 2),))
 
-    assert candidate is not None
-    charm = selected_item(candidate, EquipmentPart.CHARM)
-    assert charm.skills == (contribution(skill_id, 2),)
-    assert candidate.skill_levels.count((skill_id, 2)) == 1
+    assert candidate is None
 
 
 def test_fixed_charm_candidate_remains_usable() -> None:

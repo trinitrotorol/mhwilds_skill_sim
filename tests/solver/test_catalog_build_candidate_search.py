@@ -783,10 +783,6 @@ def test_fixture_search_contains_exact_generated_and_fixed_charm_pool() -> None:
     expected_generated_ids = [
         (
             "generated:appraisal-charm:rarity-8:"
-            "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1:combination-1"
-        ),
-        (
-            "generated:appraisal-charm:rarity-8:"
             "fixture:appraisal-pattern:r8-b-a-j-w1-a1-a1:combination-2"
         ),
         (
@@ -851,7 +847,7 @@ def test_fixture_search_contains_exact_generated_and_fixed_charm_pool() -> None:
     )
 
 
-def test_attack_level_five_can_use_aggregated_attack_three_charm_route() -> None:
+def test_attack_level_five_never_uses_illegal_aggregated_attack_three_charm() -> None:
     result = catalog_search(
         catalog=tiny_catalog(),
         requirements=(requirement("skill:attack-boost", 5),),
@@ -867,11 +863,7 @@ def test_attack_level_five_can_use_aggregated_attack_three_charm_route() -> None
         and selected_charm(candidate).skills
         and selected_charm(candidate).skills[0] == skill("skill:attack-boost", 3)
     ]
-    assert generated_routes
-    assert all(
-        dict(candidate.skill_levels)["skill:attack-boost"] >= 5
-        for candidate in generated_routes
-    )
+    assert generated_routes == []
 
 
 def test_weapon_technique_requirement_returns_generated_charm_routes() -> None:

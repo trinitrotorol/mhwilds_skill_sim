@@ -1,6 +1,8 @@
-import { reconstructDecorationPlacements } from "./decoration";
+import { applyInventoryToCatalog, decodeInventorySearchSnapshot, validateCandidateInventory } from "./inventory";
+import { catalogForQueryResultValidation } from "./appraisal-query";
 import {
   calculateBrowserPreferenceScore,
+  compareNumberArraysLexicographically,
   skillLevelsSatisfyBrowserRequirements,
 } from "./objective";
 import {
@@ -140,11 +142,11 @@ export function decodeBrowserRankedSearchRequest(
   exactKeys(
     object,
     ["requirements", "preferences", "max_results"],
-    ["weapon_kind"],
+    ["weapon_kind", "inventory"],
     "$",
   );
-  if (object.max_results !== 1) {
-    fail("$.max_results", "expected exact value 1");
+  if (!Number.isSafeInteger(object.max_results) || (object.max_results as number) < 1 || (object.max_results as number) > 20) {
+    fail("$.max_results", "expected integer between 1 and 20");
   }
   const weaponKind =
     object.weapon_kind === undefined
@@ -153,7 +155,8 @@ export function decodeBrowserRankedSearchRequest(
   const decoded: BrowserRankedSearchRequest = {
     requirements: decodeRequirements(object.requirements),
     preferences: decodePreferences(object.preferences),
-    max_results: 1,
+    max_results: object.max_results as number,
+    ...(object.inventory === undefined ? {} : { inventory: decodeInventorySearchSnapshot(object.inventory) }),
   };
   if (weaponKind !== undefined) {
     return Object.freeze({ ...decoded, weapon_kind: weaponKind });
@@ -183,7 +186,7 @@ function selectedVariants(
     if (!Number.isSafeInteger(variantId) || variantId < 0) {
       fail(`$.selected_variant_ids[${index}]`, "expected a nonnegative safe integer");
     }
-    const variant = catalog.indexed.variants_by_id[variantId];
+    const variant = catalog.indexed.variants_by_id[variantId] ?? catalog.indexed.dynamic_variants_by_id?.get(variantId);
     if (variant === undefined) {
       fail(`$.selected_variant_ids[${index}]`, "unknown variant ID");
     }
@@ -320,8 +323,21 @@ export function aggregateSelectedBuildSkillLevels(
   return result;
 }
 
+/** JSON object key order is transport-dependent; array order is semantic. */
+export function equalJsonValue(actual: unknown, expected: unknown): boolean {
+  if (actual === expected) return true;
+  if (actual === null || expected === null || typeof actual !== "object" || typeof expected !== "object") return false;
+  if (Array.isArray(actual) || Array.isArray(expected)) {
+    return Array.isArray(actual) && Array.isArray(expected) && actual.length === expected.length && actual.every((value, index) => equalJsonValue(value, expected[index]));
+  }
+  const left = actual as Record<string, unknown>;
+  const right = expected as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.hasOwn(right, key) && equalJsonValue(left[key], right[key]));
+}
+
 function assertJsonEqual(actual: unknown, expected: unknown, path: string): void {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  if (!equalJsonValue(actual, expected)) {
     fail(path, "does not match the selected compact Catalog variant");
   }
 }
@@ -450,18 +466,27 @@ export function validateRankedBuildCandidate(
     }
     return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
   });
-  assertJsonEqual(
-    candidate.placements,
-    reconstructDecorationPlacements(catalog, selected, decorationIndices),
-    "$.candidate.placements",
-  );
+  // A valid engine may choose another tied assignment or placement order.
+  // Compatibility and unique slot occupancy were checked above; the objective
+  // depends on this decoration multiset, not a canonical presentation order.
 
   const skillLevels = aggregateSelectedBuildSkillLevels(
     catalog,
     selected,
     decorationIndices,
   );
-  assertJsonEqual(candidate.skill_levels, skillLevels, "$.candidate.skill_levels");
+  // Python emits first-contribution order; browser emits catalog order. Skill
+  // totals are a keyed collection, so validate unique IDs and exact levels.
+  const declaredSkills = new Map<string, number>();
+  for (let index = 0; index < candidate.skill_levels.length; index += 1) {
+    const path = `$.candidate.skill_levels[${index}]`;
+    const entry = asPlainObject(candidate.skill_levels[index], path);
+    exactKeys(entry, ["skill_id", "level"], [], path);
+    const id = identifier(entry.skill_id, `${path}.skill_id`);
+    if (declaredSkills.has(id)) fail(path, "duplicate skill ID");
+    declaredSkills.set(id, positiveInteger(entry.level, `${path}.level`));
+  }
+  if (declaredSkills.size !== skillLevels.length || skillLevels.some((entry) => declaredSkills.get(entry.skill_id) !== entry.level)) fail("$.candidate.skill_levels", "does not match independently computed skill totals");
   if (!skillLevelsSatisfyBrowserRequirements(skillLevels, request.requirements)) {
     fail("$.candidate.skill_levels", "hard requirements are not satisfied");
   }
@@ -490,7 +515,7 @@ function nonnegativeCounter(value: unknown, path: string): void {
 }
 
 export function validateBrowserSolverResult(
-  catalog: DecodedBrowserCatalog,
+  catalogValue: DecodedBrowserCatalog,
   requestValue: BrowserRankedSearchRequest,
   resultValue: BrowserSolverResult,
 ): void {
@@ -509,9 +534,11 @@ export function validateBrowserSolverResult(
       "pruned_nodes",
       "complete_equipment_selections",
     ],
-    [],
+    ["candidates", "selected_variant_ids_by_candidate", "exhausted", "timed_out"],
     "$",
   );
+  const catalog = request.inventory === undefined ? catalogForQueryResultValidation(catalogValue,
+    Array.isArray(result.candidates) ? result.candidates as RankedBuildCandidate[] : result.candidate ? [result.candidate as RankedBuildCandidate] : []) : applyInventoryToCatalog(catalogValue, request.inventory);
   if (
     result.status !== "optimal" &&
     result.status !== "infeasible" &&
@@ -535,6 +562,30 @@ export function validateBrowserSolverResult(
   );
   if (!Array.isArray(result.selected_variant_ids)) {
     fail("$.selected_variant_ids", "expected an array");
+  }
+  if (result.candidates !== undefined) {
+    if (!Array.isArray(result.candidates) || !Array.isArray(result.selected_variant_ids_by_candidate) || result.candidates.length > request.max_results || result.candidates.length !== result.selected_variant_ids_by_candidate.length) fail("$.candidates", "invalid candidate list");
+    if (typeof result.exhausted !== "boolean" || typeof result.timed_out !== "boolean" || (result.exhausted && result.timed_out)) fail("$.exhausted", "invalid completion state");
+    if (result.timed_out !== (result.status === "timed-out") || (result.exhausted && result.status === "cancelled")) fail("$.timed_out", "status and completion state disagree");
+    const seen = new Set<string>();
+    for (let index = 0; index < result.candidates.length; index += 1) {
+      const ids = result.selected_variant_ids_by_candidate[index];
+      if (!Array.isArray(ids)) fail("$.selected_variant_ids_by_candidate", "invalid selection");
+      const signature = JSON.stringify(ids);
+      if (seen.has(signature)) fail("$.candidates", "duplicate equipment selection");
+      seen.add(signature);
+      const candidate = result.candidates[index] as RankedBuildCandidate;
+      validateRankedBuildCandidate(catalog, request, candidate, ids);
+      if (request.inventory) validateCandidateInventory(candidate, request.inventory);
+      if (index > 0) {
+        const previous = result.candidates[index - 1] as RankedBuildCandidate;
+        const previousIds = result.selected_variant_ids_by_candidate[index - 1] as number[];
+        const order = previous.preference_score - candidate.preference_score || candidate.placements.length - previous.placements.length || -compareNumberArraysLexicographically(previousIds, ids);
+        if (order < 0) fail("$.candidates", "candidates are not in deterministic ranking order");
+      }
+    }
+    assertJsonEqual(result.candidate, result.candidates[0] ?? null, "$.candidate");
+    assertJsonEqual(result.selected_variant_ids, result.selected_variant_ids_by_candidate[0] ?? [], "$.selected_variant_ids");
   }
 
   if (result.candidate === null) {
@@ -560,6 +611,7 @@ export function validateBrowserSolverResult(
       result.candidate as RankedBuildCandidate,
       result.selected_variant_ids as number[],
     );
+    if (request.inventory) validateCandidateInventory(result.candidate as RankedBuildCandidate, request.inventory);
     if (result.preference_score !== summary.preference_score) {
       fail("$.preference_score", `expected ${summary.preference_score}`);
     }

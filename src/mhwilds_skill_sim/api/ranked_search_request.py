@@ -11,6 +11,10 @@ from mhwilds_skill_sim.api.search_request import (
 from mhwilds_skill_sim.domain.equipment import WeaponKind
 from mhwilds_skill_sim.solver.preferences import SkillPreference
 from mhwilds_skill_sim.solver.requirements import SkillRequirement
+from mhwilds_skill_sim.solver.inventory import (
+    InventorySearchSnapshot,
+    decode_inventory_search_snapshot,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +23,7 @@ class RankedSearchRequest:
     preferences: tuple[SkillPreference, ...]
     max_results: int
     weapon_kind: WeaponKind | None = None
+    inventory: InventorySearchSnapshot | None = None
 
     def __post_init__(self) -> None:
         SearchRequest(
@@ -27,6 +32,10 @@ class RankedSearchRequest:
             weapon_kind=self.weapon_kind,
         )
         _validate_preferences(value=self.preferences)
+        if self.inventory is not None and not isinstance(
+            self.inventory, InventorySearchSnapshot
+        ):
+            raise TypeError("inventory must be InventorySearchSnapshot or None")
 
 
 def decode_ranked_search_request_payload(
@@ -60,6 +69,11 @@ def decode_ranked_search_request_payload(
         preferences=tuple(preferences),
         max_results=base_request.max_results,
         weapon_kind=base_request.weapon_kind,
+        inventory=(
+            decode_inventory_search_snapshot(payload["inventory"])
+            if "inventory" in payload
+            else None
+        ),
     )
 
 
@@ -85,7 +99,7 @@ def _validate_payload_shape(*, payload: object) -> None:
     _validate_exact_keys(
         value=payload,
         required_keys=("requirements", "preferences", "max_results"),
-        optional_keys=("weapon_kind",),
+        optional_keys=("weapon_kind", "inventory"),
         location="payload",
     )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,12 @@ from mhwilds_skill_sim.catalog.model import Catalog
 from scripts.serve_api import main, serve_catalog_api
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def mocked_catalog_bytes(monkeypatch):
+    # These orchestration tests replace load_catalog; bind its matching bytes too.
+    monkeypatch.setattr(Path, "read_bytes", lambda self: b"test catalog source")
 
 
 def empty_catalog() -> Catalog:
@@ -47,7 +54,8 @@ def test_serve_catalog_api_loads_creates_and_runs_in_order_with_defaults(
         calls.append(("load", path))
         return catalog
 
-    def fake_create_app(*, catalog: Catalog) -> object:
+    def fake_create_app(*, catalog: Catalog, catalog_revision: str) -> object:
+        assert catalog_revision == hashlib.sha256(b"test catalog source").hexdigest()
         calls.append(("create", catalog))
         return application
 
@@ -80,7 +88,7 @@ def test_serve_catalog_api_passes_explicit_host_and_port(
     monkeypatch.setattr(
         script_module,
         "create_app",
-        lambda *, catalog: application,
+        lambda *, catalog, catalog_revision: application,
     )
 
     def fake_run(app: object, *, host: str, port: int) -> None:
@@ -118,6 +126,10 @@ def test_serve_catalog_api_preserves_catalog_identity_with_real_factory(
 
     assert len(applications) == 1
     assert applications[0].state.catalog is catalog
+    assert (
+        applications[0].state.catalog_revision
+        == hashlib.sha256(b"test catalog source").hexdigest()
+    )
 
 
 @pytest.mark.parametrize("catalog_path", [None, "catalog.json", 1, object()])
@@ -282,7 +294,7 @@ def test_serve_catalog_api_propagates_factory_error_without_serving(
     catalog = empty_catalog()
     calls: list[object] = []
 
-    def fail_create_app(*, catalog: Catalog) -> object:
+    def fail_create_app(*, catalog: Catalog, catalog_revision: str) -> object:
         calls.append(("create", catalog))
         raise error
 

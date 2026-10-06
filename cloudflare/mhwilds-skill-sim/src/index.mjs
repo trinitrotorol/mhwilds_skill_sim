@@ -1,5 +1,6 @@
 const APPLICATION_PATH = "/game-guide/mhwilds-skill-sim";
 const APPLICATION_PATH_WITH_SLASH = `${APPLICATION_PATH}/`;
+const CHECKER_PATH = "/game-guide/mhwilds-inventory-checker";
 const ASSET_PATH_PREFIX = `${APPLICATION_PATH_WITH_SLASH}assets/`;
 
 const API_PATH_PREFIX = `${APPLICATION_PATH}/api`;
@@ -167,6 +168,9 @@ function createUpstreamRequest(request, upstreamUrl) {
 }
 
 async function proxyApiRequest(request, env, url, route) {
+  if (env?.REMOTE_SEARCH_ENABLED !== "true") {
+    return jsonErrorResponse(request, API_NOT_CONFIGURED, 503);
+  }
   const configuredOrigin = env?.API_ORIGIN;
   if (
     configuredOrigin === undefined ||
@@ -222,11 +226,11 @@ export default {
       return proxyApiRequest(request, env, url, apiRoute);
     }
 
-    if (url.pathname === APPLICATION_PATH) {
+    if (url.pathname === APPLICATION_PATH || url.pathname === CHECKER_PATH) {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return methodNotAllowed(request, ["GET", "HEAD"]);
       }
-      url.pathname = APPLICATION_PATH_WITH_SLASH;
+      url.pathname = `${url.pathname}/`;
       return new Response(null, {
         status: 308,
         headers: withSecurityHeaders({
@@ -238,7 +242,13 @@ export default {
 
     if (
       url.pathname === APPLICATION_PATH_WITH_SLASH ||
-      url.pathname.startsWith(ASSET_PATH_PREFIX)
+      url.pathname.startsWith(ASSET_PATH_PREFIX) ||
+      url.pathname === `${CHECKER_PATH}/` ||
+      url.pathname.startsWith(`${CHECKER_PATH}/assets/`) ||
+      url.pathname === `${APPLICATION_PATH_WITH_SLASH}release.json` ||
+      url.pathname === `${APPLICATION_PATH_WITH_SLASH}catalog/checker-catalog.json` ||
+      url.pathname === `${APPLICATION_PATH_WITH_SLASH}browser-solver/manifest.json` ||
+      new RegExp(`^${APPLICATION_PATH_WITH_SLASH}browser-solver/catalog-[a-f0-9]{64}\\.json$`).test(url.pathname)
     ) {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return methodNotAllowed(request, ["GET", "HEAD"]);

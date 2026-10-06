@@ -28,6 +28,7 @@ const ERROR_DETAILS = {
   rateLimited: "search rate limit exceeded",
   invalidConfiguration: "search API configuration is invalid",
   unavailable: "search API is temporarily unavailable",
+  disabled: "remote search is disabled",
 };
 
 const SECURITY_HEADERS = {
@@ -208,6 +209,10 @@ async function handleRequest(request, env) {
   }
   if (!route.methods.includes(request.method)) {
     return methodNotAllowed(request, route.methods);
+  }
+  // An unset gate must never start a potentially billable container or limiter.
+  if (env?.REMOTE_SEARCH_ENABLED !== "true") {
+    return jsonError(request, 503, ERROR_DETAILS.disabled);
   }
 
   let bodyBytes;

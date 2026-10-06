@@ -1,3 +1,4 @@
+import { BrowserSearchLimitError } from "./appraisal-query";
 import {
   calculateProjectedPreferenceScore,
   compareNumberArraysLexicographically,
@@ -14,6 +15,7 @@ import type {
 export const DECORATION_CONTROL_CHECK_INTERVAL = 1_024;
 
 export interface ProjectedDecoration {
+  readonly quantity?: number;
   readonly decoration_index: number;
   readonly decoration_id: string;
   readonly decoration_id_rank: number;
@@ -23,6 +25,7 @@ export interface ProjectedDecoration {
 }
 
 export interface DecorationProjection {
+  readonly finite_quantities?: boolean;
   readonly decorations: ReadonlyArray<ProjectedDecoration>;
   readonly id_rank_by_decoration_index: Int32Array;
 }
@@ -69,9 +72,12 @@ function contributionsDominate(
 export function createDecorationProjection(
   catalog: DecodedBrowserCatalog,
   projection: RequestProjection,
+  quantities?: ReadonlyMap<string, number>,
 ): DecorationProjection {
   const candidates: Array<Omit<ProjectedDecoration, "decoration_id_rank">> = [];
   for (const decoration of catalog.indexed.decorations) {
+    const quantity = quantities?.get(decoration.definition.decoration_id) ?? (quantities === undefined ? undefined : 0);
+    if (quantity === 0) continue;
     const contributions = new Float64Array(projection.skill_indices.length);
     let relevant = false;
     for (let index = 0; index < decoration.skills.length; index += 2) {
@@ -96,6 +102,7 @@ export function createDecorationProjection(
       required_slot_kind: decoration.required_slot_kind,
       required_slot_level: decoration.required_slot_level,
       contributions,
+      ...(quantity === undefined ? {} : { quantity }),
     }));
   }
   candidates.sort((left, right) =>
@@ -123,7 +130,7 @@ export function createDecorationProjection(
     // no harder to place and contributes at least as much makes this one
     // unusable in an optimal deterministic plan.
     if (
-      decorations.some((existing) =>
+      quantities === undefined && decorations.some((existing) =>
         contributionsDominate(existing, candidate),
       )
     ) {
@@ -134,6 +141,7 @@ export function createDecorationProjection(
   return Object.freeze({
     decorations: Object.freeze(decorations),
     id_rank_by_decoration_index: idRankByDecorationIndex,
+    ...(quantities === undefined ? {} : { finite_quantities: true }),
   });
 }
 
@@ -247,6 +255,7 @@ export function solveProjectedDecorations(
         ) {
           continue;
         }
+        if (decoration.quantity !== undefined && state.decorations.filter((index) => index === decoration.decoration_index).length >= decoration.quantity) continue;
         const levels = new Float64Array(state.levels);
         let changed = false;
         for (let index = 0; index < levels.length; index += 1) {
@@ -272,7 +281,7 @@ export function solveProjectedDecorations(
             ) as number[],
           ),
         });
-        const key = stateKey(levels);
+        const key = stateKey(levels) + (decorationProjection.finite_quantities ? `|${candidate.decorations.join(",")}` : "");
         const incumbent = next.get(key);
         if (
           incumbent === undefined ||
@@ -282,6 +291,7 @@ export function solveProjectedDecorations(
             decorationProjection.id_rank_by_decoration_index,
           )
         ) {
+          if (next.size >= 50_000 && !next.has(key)) throw new BrowserSearchLimitError();
           next.set(key, candidate);
         }
       }

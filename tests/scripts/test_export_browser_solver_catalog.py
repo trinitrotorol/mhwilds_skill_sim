@@ -64,7 +64,7 @@ def test_export_cli_function_writes_catalog_and_exact_size_summary(
     assert output_bytes.endswith(b"\n")
     assert summary["raw_bytes"] == len(output_bytes)
     assert summary["gzip_bytes"] == len(gzip.compress(output_bytes, mtime=0))
-    assert summary["expanded_equipment_count"] == 17
+    assert summary["expanded_equipment_count"] == 16
     assert summary["part_counts"] == {
         "weapon": 1,
         "head": 2,
@@ -72,7 +72,7 @@ def test_export_cli_function_writes_catalog_and_exact_size_summary(
         "arms": 1,
         "waist": 1,
         "legs": 1,
-        "charm": 10,
+        "charm": 9,
     }
     assert value["source_catalog"]["sha256"] == summary["source_sha256"]
     if pretty:
@@ -88,7 +88,7 @@ def test_export_limit_error_does_not_create_output(tmp_path: Path) -> None:
         export_browser_solver_catalog(
             catalog_path=TINY_CATALOG_PATH,
             output_path=output_path,
-            maximum_expanded_equipment=16,
+            maximum_expanded_equipment=15,
         )
 
     assert not output_path.exists()
