@@ -386,7 +386,7 @@ test("configured GET API routes map exactly and preserve query strings", async (
           headers: [...request.headers],
           bodyUsed: request.bodyUsed,
         };
-        const response = await worker.fetch(request, { API_ORIGIN });
+        const response = await worker.fetch(request, { API_ORIGIN, REMOTE_SEARCH_ENABLED: "true" });
 
         assert.equal(response.status, 206);
         assert.equal(response.statusText, "Partial API");
@@ -449,7 +449,7 @@ test("configured ranked POST streams its body and selected headers only", async 
         },
         body: '{"weapon_kind":"great-sword"}',
       });
-      const response = await worker.fetch(request, { API_ORIGIN });
+      const response = await worker.fetch(request, { API_ORIGIN, REMOTE_SEARCH_ENABLED: "true" });
 
       assert.equal(upstreamRequest.url, `${API_ORIGIN}/search/cp-sat/ranked${QUERY}`);
       assert.equal(upstreamRequest.method, "POST");
@@ -480,7 +480,7 @@ test("configured API HEAD keeps the method and strips the response body", async 
     async () => {
       const response = await worker.fetch(
         new Request(`${ORIGIN}${METADATA_PATH}`, { method: "HEAD" }),
-        { API_ORIGIN },
+        { API_ORIGIN, REMOTE_SEARCH_ENABLED: "true" },
       );
       assert.equal(upstreamRequest.method, "HEAD");
       assert.equal(upstreamRequest.url, `${API_ORIGIN}/catalog/metadata`);
@@ -503,6 +503,7 @@ test("upstream redirects are not followed or exposed to the browser", async () =
     },
     async () => {
       const response = await worker.fetch(new Request(`${ORIGIN}${HEALTH_PATH}`), {
+        REMOTE_SEARCH_ENABLED: "true",
         API_ORIGIN,
       });
       assert.equal(upstreamRequest.redirect, "manual");
@@ -535,6 +536,7 @@ test("invalid API origins fail closed without exposing or fetching their value",
     async () => {
       for (const API_ORIGIN of invalidOrigins) {
         const response = await worker.fetch(new Request(`${ORIGIN}${HEALTH_PATH}`), {
+          REMOTE_SEARCH_ENABLED: "true",
           API_ORIGIN,
         });
         assert.equal(response.status, 500, String(API_ORIGIN));
@@ -559,6 +561,7 @@ test("same-origin API configuration is rejected as a proxy loop", async () => {
     },
     async () => {
       const response = await worker.fetch(new Request(`${ORIGIN}${HEALTH_PATH}`), {
+        REMOTE_SEARCH_ENABLED: "true",
         API_ORIGIN: ORIGIN,
       });
       assert.equal(response.status, 500);
@@ -588,7 +591,7 @@ test("wrong API methods return route-specific 405 responses without fetching", a
     async () => {
       for (const [path, method, allow, body] of cases) {
         const request = new Request(`${ORIGIN}${path}`, { method, body });
-        const response = await worker.fetch(request, { API_ORIGIN });
+        const response = await worker.fetch(request, { API_ORIGIN, REMOTE_SEARCH_ENABLED: "true" });
         assert.equal(response.status, 405, `${method} ${path}`);
         assert.equal(response.headers.get("allow"), allow, `${method} ${path}`);
         assert.equal(response.headers.get("cache-control"), "no-store");
@@ -625,6 +628,7 @@ test("unrelated and lookalike API paths are never proxied", async () => {
     async () => {
       for (const path of paths) {
         const response = await worker.fetch(new Request(`${ORIGIN}${path}`), {
+          REMOTE_SEARCH_ENABLED: "true",
           API_ORIGIN,
         });
         assert.equal(response.status, 404, path);
@@ -650,6 +654,7 @@ test("fetch failures and malformed fetch results never become successes", async 
     await t.test(name, async () => {
       await withFetchMock(mockFetch, async () => {
         const response = await worker.fetch(new Request(`${ORIGIN}${HEALTH_PATH}`), {
+          REMOTE_SEARCH_ENABLED: "true",
           API_ORIGIN,
         });
         assert.equal(response.status, 502);
@@ -675,8 +680,8 @@ test("repeated API responses are independent", async () => {
     },
     async () => {
       const request = new Request(`${ORIGIN}${HEALTH_PATH}`);
-      const first = await worker.fetch(request, { API_ORIGIN });
-      const second = await worker.fetch(request, { API_ORIGIN });
+      const first = await worker.fetch(request, { API_ORIGIN, REMOTE_SEARCH_ENABLED: "true" });
+      const second = await worker.fetch(request, { API_ORIGIN, REMOTE_SEARCH_ENABLED: "true" });
 
       assert.notEqual(first, second);
       assert.equal(await first.text(), '{"status":"ok"}');
@@ -701,12 +706,14 @@ test("wrangler config preserves Worker identity and declares one safe asset coll
   assert.equal(config.workers_dev, true);
   assert.deepEqual(config.build, {
     command:
-      "npm --prefix apps/web ci --no-audit --no-fund && npm --prefix apps/web run build",
+      "sh scripts/build-service-release.sh",
   });
   assert.deepEqual(config.assets, {
-    directory: "apps/web/dist",
+    directory: ".build/service-assets",
     binding: "ASSETS",
-    run_worker_first: true,
+    run_worker_first: ["/game-guide/mhwilds-skill-sim", "/game-guide/mhwilds-inventory-checker", "/game-guide/mhwilds-skill-sim/api/*"],
+    html_handling: "auto-trailing-slash",
+    not_found_handling: "none",
   });
 
   assert.equal(Object.hasOwn(config, "routes"), false);
@@ -716,5 +723,24 @@ test("wrangler config preserves Worker identity and declares one safe asset coll
   assert.equal(Object.hasOwn(config, "token"), false);
   assert.equal(Object.hasOwn(config, "vars"), false);
   assert.doesNotMatch(configText, /API_ORIGIN/);
-  assert.doesNotMatch(configText, /not_found_handling/);
+  assert.equal(config.assets.not_found_handling, "none");
+});
+
+test("remote search remains closed even when an origin was configured", async () => {
+  const response = await worker.fetch(new Request(`${ORIGIN}${RANKED_PATH}`, { method: "POST" }), { API_ORIGIN });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).detail, "search API is not configured");
+});
+
+test("checker navigation and static catalogs stay within the two application routes", async () => {
+  const paths = ["/game-guide/mhwilds-inventory-checker/", `${APPLICATION_PATH}/catalog/checker-catalog.json`, `${APPLICATION_PATH}/browser-solver/manifest.json`, `${APPLICATION_PATH}/browser-solver/catalog-${"a".repeat(64)}.json`, `${APPLICATION_PATH}/release.json`];
+  for (const path of paths) {
+    const response = await worker.fetch(new Request(`${ORIGIN}${path}`), { ASSETS: { fetch: async () => new Response("asset") } });
+    assert.equal(response.status, 200, path);
+  }
+  const unknown = await worker.fetch(new Request(`${ORIGIN}${APPLICATION_PATH}/missing.json`), {});
+  assert.equal(unknown.status, 404);
+  const redirect = await worker.fetch(new Request(`${ORIGIN}/game-guide/mhwilds-inventory-checker?x=1`), {});
+  assert.equal(redirect.status, 308);
+  assert.equal(redirect.headers.get("Location"), `${ORIGIN}/game-guide/mhwilds-inventory-checker/?x=1`);
 });
