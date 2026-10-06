@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mhwilds_skill_sim.catalog.model import Catalog
+from mhwilds_skill_sim.catalog.checker_export import appraisal_rules
 from mhwilds_skill_sim.domain.equipment import EquipmentDefinition, EquipmentPart
 from mhwilds_skill_sim.domain.skill import SkillKind
 from mhwilds_skill_sim.solver.appraisal_charms import (
@@ -47,6 +48,7 @@ def build_browser_search_catalog(
     catalog: Catalog,
     source_catalog_sha256: str,
     maximum_expanded_equipment: int = DEFAULT_MAXIMUM_EXPANDED_EQUIPMENT,
+    include_generated_appraisal_charms: bool = True,
 ) -> dict[str, object]:
     """Convert a normalized Catalog into the compact browser search format."""
 
@@ -57,6 +59,7 @@ def build_browser_search_catalog(
     prepared = _prepare_expanded_equipment(
         catalog=catalog,
         maximum_expanded_equipment=maximum_expanded_equipment,
+        include_generated_appraisal_charms=include_generated_appraisal_charms,
     )
     skill_indexes = {
         definition.skill_id: index for index, definition in enumerate(catalog.skills)
@@ -188,6 +191,12 @@ def build_browser_search_catalog(
         "skills": skills,
         "equipment_by_part": equipment_by_part,
         "decorations": decorations,
+        **appraisal_rules(catalog),
+        **(
+            {"theoretical_appraisal_mode": "query"}
+            if not include_generated_appraisal_charms
+            else {}
+        ),
     }
 
 
@@ -219,11 +228,16 @@ def _prepare_expanded_equipment(
     *,
     catalog: Catalog,
     maximum_expanded_equipment: int,
+    include_generated_appraisal_charms: bool = True,
 ) -> _PreparedEquipment:
-    generated_charms = generate_appraisal_charm_equipment_candidates(
-        skill_groups=catalog.appraisal_charm_skill_groups,
-        patterns=catalog.appraisal_charm_patterns,
-        skill_definitions=catalog.skills,
+    generated_charms = (
+        generate_appraisal_charm_equipment_candidates(
+            skill_groups=catalog.appraisal_charm_skill_groups,
+            patterns=catalog.appraisal_charm_patterns,
+            skill_definitions=catalog.skills,
+        )
+        if include_generated_appraisal_charms
+        else ()
     )
     equipment_with_generated_charms = catalog.equipment + generated_charms
 

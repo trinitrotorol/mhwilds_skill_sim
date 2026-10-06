@@ -122,7 +122,7 @@ test("API Wrangler configuration is exact and contains no secrets", async () => 
   );
 });
 
-test("existing frontend Wrangler configuration remains unchanged", async () => {
+test("frontend serves both static services and invokes the worker only for dynamic routes", async () => {
   const frontendConfig = JSON.parse(
     await readRepositoryFile("wrangler.jsonc"),
   );
@@ -145,13 +145,18 @@ test("existing frontend Wrangler configuration remains unchanged", async () => {
     compatibility_date: "2026-07-14",
     workers_dev: true,
     build: {
-      command:
-        "npm --prefix apps/web ci --no-audit --no-fund && npm --prefix apps/web run build",
+      command: "sh scripts/build-service-release.sh",
     },
     assets: {
-      directory: "apps/web/dist",
+      directory: ".build/service-assets",
       binding: "ASSETS",
-      run_worker_first: true,
+      run_worker_first: [
+        "/game-guide/mhwilds-skill-sim",
+        "/game-guide/mhwilds-inventory-checker",
+        "/game-guide/mhwilds-skill-sim/api/*",
+      ],
+      html_handling: "auto-trailing-slash",
+      not_found_handling: "none",
     },
   });
   assert.equal("routes" in frontendConfig, false);
@@ -176,6 +181,7 @@ test("Docker image and build context follow the production allowlist", async () 
   assert.match(dockerfile, /^WORKDIR \/app$/m);
   assert.match(dockerfile, /\bPYTHONDONTWRITEBYTECODE=1\b/);
   assert.match(dockerfile, /\bPYTHONUNBUFFERED=1\b/);
+  assert.match(dockerfile, /\bMHWILDS_INVENTORY_CONTRACT_PATH=\/app\/contracts\/search-inventory\.v1\.schema\.json\b/);
 
   const copyInstructions = [...dockerfile.matchAll(/^COPY\s+(.+)$/gm)].map(
     (match) => match[1],
@@ -185,6 +191,7 @@ test("Docker image and build context follow the production allowlist", async () 
     "src/ ./src/",
     "scripts/ ./scripts/",
     ".build/production/catalog.json ./catalog.json",
+    "subprojects/inventory-checker/contracts/search-inventory.v1.schema.json ./contracts/search-inventory.v1.schema.json",
   ]);
   assert.doesNotMatch(dockerfile, /^COPY\s+\.\s/m);
   assert.doesNotMatch(dockerfile, /(?:data\/|fixtures|tests|apps\/web)/i);
@@ -225,6 +232,10 @@ test("Docker image and build context follow the production allowlist", async () 
     "!.build/",
     "!.build/production/",
     "!.build/production/catalog.json",
+    "!subprojects/",
+    "!subprojects/inventory-checker/",
+    "!subprojects/inventory-checker/contracts/",
+    "!subprojects/inventory-checker/contracts/search-inventory.v1.schema.json",
     "**/__pycache__/",
     "**/*.py[cod]",
   ]);
@@ -234,7 +245,7 @@ test("Docker image and build context follow the production allowlist", async () 
     dockerignore,
     /^!(?:\.git|tests|apps|data|node_modules|\.github)(?:\/|$)/m,
   );
-  assert.equal(gitignore.trimEnd().split("\n").at(-1), ".build/");
+  assert.match(gitignore, /^\.build\/$/m);
   assert.equal(
     gitignore.split("\n").filter((line) => line === ".build/").length,
     1,
@@ -292,6 +303,8 @@ test("deployment workflow is manual, bounded, and complete", async () => {
   );
 
   assert.match(workflow, /actions\/setup-python@/);
+  assert.match(workflow, /submodules: recursive/);
+  assert.match(workflow, /MHWILDS_INVENTORY_CONTRACT_PATH: \$\{\{ github\.workspace \}\}\/subprojects\/inventory-checker\/contracts\/search-inventory\.v1\.schema\.json/);
   assert.match(workflow, /python-version: "3\.12"/);
   assert.match(workflow, /python -m pip install "\.\[dev\]"/);
   assert.match(workflow, /python -m pytest/);

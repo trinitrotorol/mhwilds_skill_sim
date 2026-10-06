@@ -1,0 +1,9 @@
+* text=auto
+*.sh text eol=lf
+scripts/nodew text eol=lf
+scripts/npmw text eol=lf
+scripts/pyw text eol=lf
+.node-version text eol=lf
+requirements-toolchain.txt text eol=lf
+data/fixtures/**/*.json text eol=lf
+apps/web/src/browser-solver/fixtures/*.json text eol=lf

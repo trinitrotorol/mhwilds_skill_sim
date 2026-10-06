@@ -91,7 +91,7 @@ function createHarness(options = {}) {
   };
 
   return {
-    env: { SEARCH_API: namespace, SEARCH_RATE_LIMITER: limiter },
+    env: { REMOTE_SEARCH_ENABLED: "true", SEARCH_API: namespace, SEARCH_RATE_LIMITER: limiter },
     events,
     instanceNames,
     containerRequests,
@@ -113,6 +113,34 @@ test("handler module has one fetch handler and no import side effects", () => {
   assert.equal(importStdoutWrites, 0);
   assert.deepEqual(Object.keys(worker), ["fetch"]);
   assert.equal(typeof worker.fetch, "function");
+});
+
+test("remote search is closed unless explicitly enabled before any backend activity", async () => {
+  for (const gate of [undefined, null, false, true, "false", "TRUE", "1", ""]) {
+    for (const [path, method] of [
+      [HEALTH_PATH, "GET"], [HEALTH_PATH, "HEAD"],
+      [METADATA_PATH, "GET"], [METADATA_PATH, "HEAD"],
+      [RANKED_PATH, "POST"],
+    ]) {
+      const harness = createHarness();
+      harness.env.REMOTE_SEARCH_ENABLED = gate;
+      const request = method === "POST"
+        ? postRequest("body must stay unread")
+        : new Request(`${ORIGIN}${path}`, { method });
+      const response = await worker.fetch(request, harness.env);
+      await assertJsonError(response, 503, "remote search is disabled");
+      assert.equal(request.bodyUsed, false);
+      assert.deepEqual(harness.events, []);
+      assert.deepEqual(harness.instanceNames, []);
+      assert.deepEqual(harness.limiterCalls, []);
+      assert.deepEqual(harness.containerRequests, []);
+    }
+  }
+  await assertJsonError(
+    await worker.fetch(new Request(`${ORIGIN}${HEALTH_PATH}`), undefined),
+    503,
+    "remote search is disabled",
+  );
 });
 
 test("health and metadata GET map exactly, preserve query, and share production", async (t) => {
@@ -515,7 +543,10 @@ test("missing or invalid container namespace and stub return stable 500", async 
 
   for (const [name, env] of cases) {
     await t.test(name, async () => {
-      const response = await worker.fetch(new Request(`${ORIGIN}${HEALTH_PATH}`), env);
+      const response = await worker.fetch(new Request(`${ORIGIN}${HEALTH_PATH}`), {
+        ...env,
+        REMOTE_SEARCH_ENABLED: "true",
+      });
       await assertJsonError(response, 500, "search API configuration is invalid");
     });
   }
@@ -540,7 +571,7 @@ test("container fetch throw and non-Response results return stable 503", async (
 test("HEAD errors never include a body", async () => {
   const missingBindingResponse = await worker.fetch(
     new Request(`${ORIGIN}${HEALTH_PATH}`, { method: "HEAD" }),
-    {},
+    { REMOTE_SEARCH_ENABLED: "true" },
   );
   await assertJsonError(missingBindingResponse, 500, "search API configuration is invalid");
   assert.equal(missingBindingResponse.body, null);

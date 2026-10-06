@@ -1,0 +1,170 @@
+#!/usr/bin/env sh
+
+set -eu
+umask 077
+
+EXPECTED_NODE_VERSION="v24.18.0"
+EXPECTED_NPM_VERSION="11.16.0"
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+REPOSITORY_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd -P)
+VENV_DIR="${REPOSITORY_ROOT}/.venv"
+CACHE_DIR="${REPOSITORY_ROOT}/.cache"
+NODE_EXECUTABLE="${VENV_DIR}/bin/node"
+NPM_EXECUTABLE="${VENV_DIR}/bin/npm"
+
+fail() {
+  printf '%s\n' "npmw: $*" >&2
+  exit 1
+}
+
+assert_directory_in_repository() {
+  DIRECTORY_PATH=$1
+  DIRECTORY_LABEL=$2
+
+  DIRECTORY_REAL=$(CDPATH= cd -P -- "${DIRECTORY_PATH}" 2>/dev/null && pwd -P) ||
+    fail "${DIRECTORY_LABEL} is not an accessible directory: ${DIRECTORY_PATH}"
+  case "${DIRECTORY_REAL}/" in
+    "${REPOSITORY_ROOT}/"*) ;;
+    *) fail "${DIRECTORY_LABEL} resolves outside the repository: ${DIRECTORY_REAL}" ;;
+  esac
+}
+
+ensure_repository_directory() {
+  LOCAL_DIRECTORY=$1
+  LOCAL_LABEL=$2
+
+  [ ! -L "${LOCAL_DIRECTORY}" ] ||
+    fail "refusing to use symlinked ${LOCAL_LABEL}: ${LOCAL_DIRECTORY}"
+  if [ -e "${LOCAL_DIRECTORY}" ]; then
+    [ -d "${LOCAL_DIRECTORY}" ] || fail "${LOCAL_LABEL} is not a directory"
+  else
+    mkdir -p "${LOCAL_DIRECTORY}" ||
+      fail "could not create ${LOCAL_LABEL}: ${LOCAL_DIRECTORY}"
+  fi
+  assert_directory_in_repository "${LOCAL_DIRECTORY}" "${LOCAL_LABEL}"
+}
+
+[ -d "${VENV_DIR}" ] && [ ! -L "${VENV_DIR}" ] ||
+  fail "repository-local .venv is unavailable; run ./scripts/bootstrap.sh under WSL or Linux"
+
+command -v readlink >/dev/null 2>&1 ||
+  fail "GNU readlink is required to validate toolchain executables"
+for LOCAL_EXECUTABLE in "${NODE_EXECUTABLE}" "${NPM_EXECUTABLE}"; do
+  [ -x "${LOCAL_EXECUTABLE}" ] ||
+    fail "required executable is missing: ${LOCAL_EXECUTABLE}"
+  RESOLVED_EXECUTABLE=$(readlink -f -- "${LOCAL_EXECUTABLE}" 2>/dev/null) ||
+    fail "could not resolve ${LOCAL_EXECUTABLE}"
+  case "${RESOLVED_EXECUTABLE}" in
+    "${VENV_DIR}/"*) ;;
+    *) fail "toolchain executable resolves outside .venv: ${RESOLVED_EXECUTABLE}" ;;
+  esac
+done
+
+ensure_repository_directory "${CACHE_DIR}" "cache directory"
+ensure_repository_directory "${CACHE_DIR}/npm" "npm cache directory"
+ensure_repository_directory "${CACHE_DIR}/npm/_logs" "npm logs directory"
+ensure_repository_directory "${CACHE_DIR}/npm-prefix" "npm prefix directory"
+ensure_repository_directory "${CACHE_DIR}/tmp" "temporary directory"
+ensure_repository_directory "${CACHE_DIR}/xdg" "XDG directory"
+ensure_repository_directory "${CACHE_DIR}/xdg/cache" "XDG cache directory"
+ensure_repository_directory "${CACHE_DIR}/xdg/config" "XDG config directory"
+ensure_repository_directory "${CACHE_DIR}/xdg/data" "XDG data directory"
+ensure_repository_directory "${CACHE_DIR}/xdg/state" "XDG state directory"
+ensure_repository_directory "${CACHE_DIR}/corepack" "Corepack cache directory"
+ensure_repository_directory "${CACHE_DIR}/ms-playwright" "Playwright cache directory"
+
+GLOBAL_NPM_CONFIG="${CACHE_DIR}/npm/global-npmrc"
+[ ! -L "${GLOBAL_NPM_CONFIG}" ] ||
+  fail "refusing to use a symlinked npm global config"
+[ -e "${GLOBAL_NPM_CONFIG}" ] || : >"${GLOBAL_NPM_CONFIG}"
+[ -f "${GLOBAL_NPM_CONFIG}" ] ||
+  fail "npm global config is not a regular file"
+[ -f "${REPOSITORY_ROOT}/.npmrc" ] && [ ! -L "${REPOSITORY_ROOT}/.npmrc" ] ||
+  fail "repository .npmrc is missing or symlinked"
+
+PASSTHROUGH_ARGUMENTS="0"
+EXPECT_PROJECT_PREFIX="0"
+for ARGUMENT in "$@"; do
+  if [ "${EXPECT_PROJECT_PREFIX}" = "1" ]; then
+    case "${ARGUMENT}" in
+      apps/web | cloudflare/mhwilds-skill-sim-api) ;;
+      *) fail "--prefix must name an allowed repository application" ;;
+    esac
+    assert_directory_in_repository "${REPOSITORY_ROOT}/${ARGUMENT}" "application prefix"
+    EXPECT_PROJECT_PREFIX="0"
+    continue
+  fi
+  if [ "${PASSTHROUGH_ARGUMENTS}" = "1" ]; then
+    continue
+  fi
+  case "${ARGUMENT}" in
+    --) PASSTHROUGH_ARGUMENTS="1" ;;
+    --prefix) EXPECT_PROJECT_PREFIX="1" ;;
+    -v | --version | -h | --help | --package-lock-only) ;;
+    -*)
+      printf '%s\n' \
+        "npmw: npm-level option ${ARGUMENT} is not allowed by the isolated wrapper" >&2
+      exit 64
+      ;;
+  esac
+done
+[ "${EXPECT_PROJECT_PREFIX}" = "0" ] || fail "--prefix requires an application path"
+
+unset \
+  NODE_OPTIONS \
+  NODE_PATH \
+  NPM_CONFIG_CACHE \
+  NPM_CONFIG_USERCONFIG \
+  NPM_CONFIG_GLOBALCONFIG \
+  NPM_CONFIG_PREFIX \
+  NPM_CONFIG_LOGS_DIR \
+  NPM_CONFIG_GLOBAL \
+  NPM_CONFIG_LOCATION \
+  NPM_CONFIG_REGISTRY \
+  NPM_CONFIG_AUDIT \
+  NPM_CONFIG_FUND \
+  NPM_CONFIG_UPDATE_NOTIFIER \
+  npm_config_cache \
+  npm_config_userconfig \
+  npm_config_globalconfig \
+  npm_config_prefix \
+  npm_config_logs_dir \
+  npm_config_global \
+  npm_config_location \
+  npm_config_registry \
+  npm_config_audit \
+  npm_config_fund \
+  npm_config_update_notifier
+
+export PATH="${VENV_DIR}/bin${PATH:+:${PATH}}"
+export npm_config_cache="${CACHE_DIR}/npm"
+export npm_config_userconfig="${REPOSITORY_ROOT}/.npmrc"
+export npm_config_globalconfig="${GLOBAL_NPM_CONFIG}"
+export npm_config_prefix="${CACHE_DIR}/npm-prefix"
+export npm_config_logs_dir="${CACHE_DIR}/npm/_logs"
+export npm_config_global="false"
+export npm_config_location="project"
+export npm_config_registry="https://registry.npmjs.org/"
+export npm_config_audit="false"
+export npm_config_fund="false"
+export npm_config_update_notifier="false"
+export XDG_CACHE_HOME="${CACHE_DIR}/xdg/cache"
+export XDG_CONFIG_HOME="${CACHE_DIR}/xdg/config"
+export XDG_DATA_HOME="${CACHE_DIR}/xdg/data"
+export XDG_STATE_HOME="${CACHE_DIR}/xdg/state"
+export COREPACK_HOME="${CACHE_DIR}/corepack"
+export PLAYWRIGHT_BROWSERS_PATH="${CACHE_DIR}/ms-playwright"
+export TMPDIR="${CACHE_DIR}/tmp"
+export TMP="${CACHE_DIR}/tmp"
+export TEMP="${CACHE_DIR}/tmp"
+
+ACTUAL_NODE_VERSION=$("${NODE_EXECUTABLE}" --version 2>/dev/null || true)
+[ "${ACTUAL_NODE_VERSION}" = "${EXPECTED_NODE_VERSION}" ] ||
+  fail ".venv Node.js is ${ACTUAL_NODE_VERSION:-unknown}; expected ${EXPECTED_NODE_VERSION}"
+ACTUAL_NPM_VERSION=$("${NPM_EXECUTABLE}" --version 2>/dev/null || true)
+[ "${ACTUAL_NPM_VERSION}" = "${EXPECTED_NPM_VERSION}" ] ||
+  fail ".venv npm is ${ACTUAL_NPM_VERSION:-unknown}; expected ${EXPECTED_NPM_VERSION}"
+
+cd "${REPOSITORY_ROOT}"
+exec "${NPM_EXECUTABLE}" "$@"

@@ -1,7 +1,8 @@
 FROM python:3.12.13-slim@sha256:c3d81d25b3154142b0b42eb1e61300024426268edeb5b5a26dd7ddf64d9daf28
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    MHWILDS_INVENTORY_CONTRACT_PATH=/app/contracts/search-inventory.v1.schema.json
 
 WORKDIR /app
 
@@ -15,6 +16,7 @@ RUN python -m pip install --no-cache-dir . \
         --home-dir /nonexistent --shell /usr/sbin/nologin app
 
 COPY .build/production/catalog.json ./catalog.json
+COPY subprojects/inventory-checker/contracts/search-inventory.v1.schema.json ./contracts/search-inventory.v1.schema.json
 
 USER 10001:10001
 

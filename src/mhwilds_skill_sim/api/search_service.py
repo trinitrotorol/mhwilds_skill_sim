@@ -21,6 +21,11 @@ from mhwilds_skill_sim.solver.cp_sat_search import (
 from mhwilds_skill_sim.solver.search_result import (
     search_limited_catalog_build_candidates_by_skill_requirements,
 )
+from mhwilds_skill_sim.solver.inventory import (
+    InventoryCatalogMismatchError,
+    validate_snapshot_contract,
+)
+from mhwilds_skill_sim.solver.inventory_search import search_inventory_ranked_builds
 
 
 _CP_SAT_SEARCH_TIMEOUT_SECONDS = 10.0
@@ -67,11 +72,32 @@ def search_catalog_ranked_build_candidates_with_cp_sat_from_payload(
     *,
     catalog: Catalog,
     payload: object,
+    catalog_revision: str | None = None,
 ) -> dict[str, object]:
     if not isinstance(catalog, Catalog):
         raise TypeError("catalog must be Catalog")
 
     request = decode_ranked_search_request_payload(payload=payload)
+    if request.inventory is not None:
+        validate_snapshot_contract(payload["inventory"])
+        if catalog_revision is None:
+            raise InventoryCatalogMismatchError(
+                "search catalog revision is unavailable"
+            )
+        result = search_inventory_ranked_builds(
+            catalog=catalog,
+            catalog_revision=catalog_revision,
+            snapshot=request.inventory,
+            requirements=request.requirements,
+            preferences=request.preferences,
+            max_results=request.max_results,
+            weapon_kind=request.weapon_kind,
+            timeout_seconds=_CP_SAT_SEARCH_TIMEOUT_SECONDS,
+        )
+        return build_ranked_cp_sat_search_result_to_response(
+            result=result,
+            preferences=request.preferences,
+        )
     result = search_catalog_ranked_build_candidates_with_cp_sat(
         catalog=catalog,
         requirements=request.requirements,

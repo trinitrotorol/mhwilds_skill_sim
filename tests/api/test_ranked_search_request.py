@@ -93,6 +93,7 @@ def test_ranked_search_request_is_frozen_and_uses_slots() -> None:
         "preferences",
         "max_results",
         "weapon_kind",
+        "inventory",
     )
     assert not hasattr(request, "__dict__")
     with pytest.raises(FrozenInstanceError):

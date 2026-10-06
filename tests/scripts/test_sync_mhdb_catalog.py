@@ -130,7 +130,7 @@ def test_sync_files_writes_all_raw_files_and_loadable_catalog(
     assert len(catalog.decorations) == 3
     assert tmp_path.resolve() in raw_directory.resolve().parents
     assert tmp_path.resolve() in catalog_output.resolve().parents
-    assert ROOT.resolve() not in raw_directory.resolve().parents
+    assert FIXTURE_DIRECTORY.resolve() not in raw_directory.resolve().parents
 
 
 def test_main_uses_default_locale_and_timeout_and_returns_zero(

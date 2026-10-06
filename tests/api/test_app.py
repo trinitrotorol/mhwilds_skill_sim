@@ -146,9 +146,11 @@ def test_create_app_has_exact_catalog_keyword_only_signature() -> None:
     signature = inspect.signature(create_app)
     parameters = signature.parameters
 
-    assert list(parameters) == ["catalog"]
+    assert list(parameters) == ["catalog", "catalog_revision"]
     assert parameters["catalog"].kind is inspect.Parameter.KEYWORD_ONLY
     assert parameters["catalog"].default is None
+    assert parameters["catalog_revision"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameters["catalog_revision"].default is None
     assert isinstance(create_app(), FastAPI)
 
 

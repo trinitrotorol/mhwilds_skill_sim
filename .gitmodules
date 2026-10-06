@@ -1,0 +1,3 @@
+[submodule "subprojects/inventory-checker"]
+	path = subprojects/inventory-checker
+	url = https://github.com/trinitrotorol/mhwilds_inventory_checker.git

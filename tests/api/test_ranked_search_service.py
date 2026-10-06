@@ -154,15 +154,17 @@ def test_function_has_exact_keyword_only_signature_and_rejects_positionals() -> 
         search_catalog_ranked_build_candidates_with_cp_sat_from_payload,
     ).parameters
 
-    assert tuple(parameters) == ("catalog", "payload")
+    assert tuple(parameters) == ("catalog", "payload", "catalog_revision")
     assert all(
         parameter.kind is inspect.Parameter.KEYWORD_ONLY
         for parameter in parameters.values()
     )
     assert all(
         parameter.default is inspect.Parameter.empty
-        for parameter in parameters.values()
+        for name, parameter in parameters.items()
+        if name != "catalog_revision"
     )
+    assert parameters["catalog_revision"].default is None
 
     with pytest.raises(TypeError):
         search_catalog_ranked_build_candidates_with_cp_sat_from_payload(  # type: ignore[misc]

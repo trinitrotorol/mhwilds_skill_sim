@@ -1,5 +1,18 @@
 # MHWILDS スキルシミュレータ API Worker
 
+現在の静的サービスではリモートAPIを無効にしています。`REMOTE_SEARCH_ENABLED`
+が文字列 `true` と完全一致しない限り、全APIはコンテナ・レート制限処理を
+呼ばず503を返します。追加費用をゼロに抑える条件を別途検証するまで有効化しません。
+
+所持品スナップショットのJSON Schemaは、固定された子submoduleの
+`contracts/search-inventory.v1.schema.json`を直接使用します。Docker buildはその
+ファイルだけを`/app/contracts/search-inventory.v1.schema.json`へコピーし、
+`MHWILDS_INVENTORY_CONTRACT_PATH`で通常インストールされたPythonパッケージに
+場所を指定します。リクエストからこの場所を指定することはできません。
+ローカルのeditable環境では、未設定時にリポジトリの固定子submoduleを参照します。
+通常のwheel環境では、この環境変数を固定子契約ファイルの絶対パスに設定してください。
+契約ファイルがない場合は所持品検索を拒否します。親に手動管理する契約コピーは置きません。
+
 ## アーキテクチャ
 
 公開画面とStatic Assetsは既存Worker `mhwilds-skill-sim`が引き続き配信します。よりspecificな次のCustom Routeだけを、新しいWorker `mhwilds-skill-sim-api`へ割り当てます。

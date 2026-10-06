@@ -54,6 +54,13 @@ def generate_appraisal_charm_equipment_candidates(
             product(*option_groups),
             start=1,
         ):
+            # Distinct rolls cannot repeat the same base skill. A repeated group
+            # still permits different choices from that group, never summed rolls.
+            # Source: aevanko/talisman-explorer (duplicate-base validation).
+            if len({skill.skill_id for skill in selected_skills}) != len(
+                selected_skills
+            ):
+                continue
             aggregated_skills = _aggregate_selected_skills(
                 selected_skills=selected_skills,
                 skill_definitions_by_id=skill_definitions_by_id,

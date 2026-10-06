@@ -264,7 +264,7 @@ def test_rejects_missing_pattern_group_reference() -> None:
     assert "skill_group_ids" in str(exc_info.value)
 
 
-def test_repeated_pattern_group_references_are_accepted() -> None:
+def test_repeated_group_with_only_same_base_skill_produces_no_legal_charm() -> None:
     generated = generate(
         patterns=(
             pattern(
@@ -273,8 +273,7 @@ def test_repeated_pattern_group_references_are_accepted() -> None:
         ),
     )
 
-    assert len(generated) == 1
-    assert generated[0].skills == (contribution(level=2),)
+    assert generated == ()
 
 
 def test_one_group_one_option_generates_expected_charm() -> None:
@@ -465,21 +464,17 @@ def test_repeated_group_positions_choose_independently_before_deduplication() ->
     )
 
     assert [charm.skills for charm in generated] == [
-        (contribution("skill:attack-boost", 2),),
         (
             contribution("skill:attack-boost"),
             contribution("skill:critical-eye"),
         ),
-        (contribution("skill:critical-eye", 2),),
     ]
     assert [charm.equipment_id.rsplit("-", 1)[-1] for charm in generated] == [
-        "1",
         "2",
-        "4",
     ]
 
 
-def test_repeated_selected_skills_are_summed_in_first_occurrence_order() -> None:
+def test_repeated_base_skills_across_different_groups_are_excluded() -> None:
     groups = (
         skill_group(
             "appraisal-group:B",
@@ -512,31 +507,24 @@ def test_repeated_selected_skills_are_summed_in_first_occurrence_order() -> None
         ),
     )
 
-    assert generated[0].skills == (
-        contribution("skill:attack-boost", 3),
-        contribution("skill:weakness-exploit", 1),
-    )
+    assert generated == ()
 
 
-def test_rejects_aggregated_selected_level_above_maximum_rank() -> None:
+def test_duplicate_roll_is_skipped_even_when_sum_would_exceed_maximum_rank() -> None:
     groups = (skill_group(skills=(contribution("skill:attack-boost", 2),)),)
 
-    with pytest.raises(ValueError) as exc_info:
+    assert (
         generate(
             skill_groups=groups,
             patterns=(
-                pattern(
-                    skill_group_ids=("appraisal-group:A", "appraisal-group:A"),
-                ),
+                pattern(skill_group_ids=("appraisal-group:A", "appraisal-group:A")),
             ),
             skill_definitions=(
                 skill_definition("skill:attack-boost", maximum_level=3),
             ),
         )
-
-    assert "skill_groups" in str(exc_info.value)
-    assert "skill_definitions" in str(exc_info.value)
-    assert "maximum" in str(exc_info.value)
+        == ()
+    )
 
 
 def test_generated_values_slots_flags_and_ids_match_contract() -> None:
@@ -654,7 +642,7 @@ def test_selection_orders_with_equal_totals_and_slots_deduplicate() -> None:
         ),
     )
 
-    assert len(generated) == 3
+    assert len(generated) == 1
     assert generated[0].equipment_id.endswith("combination-1")
     assert generated[0].skills == (
         contribution("skill:attack-boost"),

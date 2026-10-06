@@ -1,0 +1,76 @@
+#!/usr/bin/env sh
+
+set -eu
+umask 077
+
+EXPECTED_NODE_VERSION="v24.18.0"
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+REPOSITORY_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd -P)
+VENV_DIR="${REPOSITORY_ROOT}/.venv"
+CACHE_DIR="${REPOSITORY_ROOT}/.cache"
+NODE_EXECUTABLE="${VENV_DIR}/bin/node"
+
+fail() {
+  printf '%s\n' "nodew: $*" >&2
+  exit 1
+}
+
+ensure_repository_directory() {
+  LOCAL_DIRECTORY=$1
+  LOCAL_LABEL=$2
+
+  [ ! -L "${LOCAL_DIRECTORY}" ] ||
+    fail "refusing to use symlinked ${LOCAL_LABEL}: ${LOCAL_DIRECTORY}"
+  if [ -e "${LOCAL_DIRECTORY}" ]; then
+    [ -d "${LOCAL_DIRECTORY}" ] || fail "${LOCAL_LABEL} is not a directory"
+  else
+    mkdir -p "${LOCAL_DIRECTORY}" ||
+      fail "could not create ${LOCAL_LABEL}: ${LOCAL_DIRECTORY}"
+  fi
+  DIRECTORY_REAL=$(CDPATH= cd -P -- "${LOCAL_DIRECTORY}" 2>/dev/null && pwd -P) ||
+    fail "could not resolve ${LOCAL_LABEL}"
+  case "${DIRECTORY_REAL}/" in
+    "${REPOSITORY_ROOT}/"*) ;;
+    *) fail "${LOCAL_LABEL} resolves outside the repository: ${DIRECTORY_REAL}" ;;
+  esac
+}
+
+[ -d "${VENV_DIR}" ] && [ ! -L "${VENV_DIR}" ] ||
+  fail "repository-local .venv is unavailable; run ./scripts/bootstrap.sh under WSL or Linux"
+[ -x "${NODE_EXECUTABLE}" ] ||
+  fail "Node.js is unavailable at ${NODE_EXECUTABLE}"
+
+command -v readlink >/dev/null 2>&1 ||
+  fail "GNU readlink is required to validate the Node.js executable"
+RESOLVED_NODE=$(readlink -f -- "${NODE_EXECUTABLE}" 2>/dev/null) ||
+  fail "could not resolve the Node.js executable"
+case "${RESOLVED_NODE}" in
+  "${VENV_DIR}/"*) ;;
+  *) fail "Node.js resolves outside .venv: ${RESOLVED_NODE}" ;;
+esac
+
+ensure_repository_directory "${CACHE_DIR}" "cache directory"
+ensure_repository_directory "${CACHE_DIR}/tmp" "temporary directory"
+ensure_repository_directory "${CACHE_DIR}/xdg" "XDG directory"
+ensure_repository_directory "${CACHE_DIR}/xdg/cache" "XDG cache directory"
+ensure_repository_directory "${CACHE_DIR}/xdg/config" "XDG config directory"
+ensure_repository_directory "${CACHE_DIR}/xdg/data" "XDG data directory"
+ensure_repository_directory "${CACHE_DIR}/xdg/state" "XDG state directory"
+
+unset NODE_OPTIONS NODE_PATH
+export PATH="${VENV_DIR}/bin${PATH:+:${PATH}}"
+export TMPDIR="${CACHE_DIR}/tmp"
+export TMP="${CACHE_DIR}/tmp"
+export TEMP="${CACHE_DIR}/tmp"
+export XDG_CACHE_HOME="${CACHE_DIR}/xdg/cache"
+export XDG_CONFIG_HOME="${CACHE_DIR}/xdg/config"
+export XDG_DATA_HOME="${CACHE_DIR}/xdg/data"
+export XDG_STATE_HOME="${CACHE_DIR}/xdg/state"
+
+ACTUAL_NODE_VERSION=$("${NODE_EXECUTABLE}" --version 2>/dev/null || true)
+[ "${ACTUAL_NODE_VERSION}" = "${EXPECTED_NODE_VERSION}" ] ||
+  fail ".venv Node.js is ${ACTUAL_NODE_VERSION:-unknown}; expected ${EXPECTED_NODE_VERSION}"
+
+cd "${REPOSITORY_ROOT}"
+exec "${NODE_EXECUTABLE}" "$@"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 from typing import Sequence
 
@@ -32,7 +33,10 @@ def serve_catalog_api(
         raise ValueError("port must be between 1 and 65535")
 
     catalog = load_catalog(path=catalog_path)
-    application = create_app(catalog=catalog)
+    application = create_app(
+        catalog=catalog,
+        catalog_revision=hashlib.sha256(catalog_path.read_bytes()).hexdigest(),
+    )
     uvicorn.run(
         application,
         host=host,

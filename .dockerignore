@@ -8,5 +8,9 @@
 !.build/
 !.build/production/
 !.build/production/catalog.json
+!subprojects/
+!subprojects/inventory-checker/
+!subprojects/inventory-checker/contracts/
+!subprojects/inventory-checker/contracts/search-inventory.v1.schema.json
 **/__pycache__/
 **/*.py[cod]
