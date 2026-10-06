@@ -1,4 +1,5 @@
 import { decodeBrowserSearchCatalog } from "./catalog";
+import { BrowserSearchLimitError } from "./appraisal-query";
 import type {
   BrowserSolverWorkerErrorCode,
   BrowserSolverWorkerErrorResponse,
@@ -22,6 +23,7 @@ const ERROR_MESSAGES: Readonly<Record<BrowserSolverWorkerErrorCode, string>> =
     "duplicate-search-id": "Browser solver search ID is already active",
     "unknown-search-id": "Browser solver search ID is not active",
     "search-failed": "Browser solver search failed",
+    "search-limit": "Browser search working-set limit reached; reduce search conditions",
   });
 
 interface ActiveSearch {
@@ -213,9 +215,9 @@ export function createBrowserSolverWorkerRuntime(
       if (activeSearches.get(searchId) === active) {
         postMessage({ type: "result", search_id: searchId, result });
       }
-    } catch {
+    } catch (error) {
       if (activeSearches.get(searchId) === active) {
-        postMessage(errorResponse("search-failed", searchId));
+        postMessage(errorResponse(error instanceof BrowserSearchLimitError ? "search-limit" : "search-failed", searchId));
       }
     } finally {
       if (activeSearches.get(searchId) === active) {

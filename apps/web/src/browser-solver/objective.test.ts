@@ -66,7 +66,7 @@ describe("browser ranked request and objective", () => {
       value: {
         requirements: [],
         preferences: [],
-        max_results: 2,
+        max_results: 21,
       },
       path: "$.max_results",
     },

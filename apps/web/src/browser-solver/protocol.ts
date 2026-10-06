@@ -65,6 +65,7 @@ export type BrowserSolverWorkerErrorCode =
   | "invalid-catalog"
   | "duplicate-search-id"
   | "unknown-search-id"
+  | "search-limit"
   | "search-failed";
 
 export interface BrowserSolverWorkerErrorResponse {

@@ -1,3 +1,5 @@
+import type { AppraisalRules, InventorySearchSnapshot } from "./inventory";
+
 export const EQUIPMENT_PARTS = [
   "weapon",
   "head",
@@ -28,8 +30,9 @@ export interface BrowserRankedSearchPreference {
 export interface BrowserRankedSearchRequest {
   readonly requirements: ReadonlyArray<BrowserRankedSearchRequirement>;
   readonly preferences: ReadonlyArray<BrowserRankedSearchPreference>;
-  readonly max_results: 1;
+  readonly max_results: number;
   readonly weapon_kind?: string;
+  readonly inventory?: InventorySearchSnapshot;
 }
 
 export interface BrowserCatalogSource {
@@ -97,6 +100,7 @@ export interface IndexedDecoration {
 }
 
 export interface BrowserCatalogIndexes {
+  readonly dynamic_variants_by_id?: ReadonlyMap<number, IndexedEquipmentVariant>;
   readonly skill_index_by_id: ReadonlyMap<string, number>;
   readonly decoration_index_by_id: ReadonlyMap<string, number>;
   readonly variants_by_id: ReadonlyArray<IndexedEquipmentVariant>;
@@ -108,6 +112,8 @@ export interface BrowserCatalogIndexes {
 }
 
 export interface DecodedBrowserCatalog {
+  readonly theoretical_appraisal_mode?: "query";
+  readonly appraisal_rules?: AppraisalRules;
   readonly format_version: 1;
   readonly source_catalog: BrowserCatalogSource;
   readonly skills: ReadonlyArray<BrowserCatalogSkill>;
@@ -161,6 +167,10 @@ export type BrowserSolverStatus =
   | "cancelled";
 
 export interface BrowserSolverResult {
+  candidates?: RankedBuildCandidate[];
+  selected_variant_ids_by_candidate?: number[][];
+  exhausted?: boolean;
+  timed_out?: boolean;
   status: BrowserSolverStatus;
   candidate: RankedBuildCandidate | null;
   selected_variant_ids: number[];

@@ -153,6 +153,22 @@ describe("BrowserSolverWorkerClient", () => {
     await expect(search).rejects.toThrow("Browser solver search failed");
   });
 
+  it("distinguishes a working-set limit from no solution and offers Japanese recovery guidance", async () => {
+    const worker = new FakeWorker();
+    const client = new BrowserSolverWorkerClient(() => worker);
+    const initialization = client.initialize({});
+    ready(worker);
+    await initialization;
+    const search = client.search(REQUEST, { searchId: "limited" });
+    await Promise.resolve();
+    worker.emit({ type: "error", code: "search-limit", message: "working-set limit", search_id: "limited" });
+    await expect(search).rejects.toMatchObject({ code: "search-limit", name: "BrowserSearchLimitError", message: expect.stringContaining("候補なしという判定ではありません") });
+    const retry = client.search(REQUEST, { searchId: "retry" });
+    await Promise.resolve();
+    worker.emit({ type: "result", search_id: "retry", result: result() });
+    await expect(retry).resolves.toEqual(result());
+  });
+
   it("terminates and recreates the worker for effective synchronous cancel", async () => {
     const workers: FakeWorker[] = [];
     let clock = 10;

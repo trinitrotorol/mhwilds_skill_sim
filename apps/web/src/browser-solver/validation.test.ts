@@ -5,6 +5,7 @@ import { solveBrowserRankedSearch } from "./solver";
 import { makeTestCatalog } from "./test-catalog";
 import {
   BrowserSolverValidationError,
+  equalJsonValue,
   validateBrowserSolverResult,
   validateRankedBuildCandidate,
 } from "./validation";
@@ -24,6 +25,52 @@ function validBuild() {
 }
 
 describe("browser solver independent validation", () => {
+  it("accepts skill totals in Python contribution order and rejects duplicate or altered totals", () => {
+    const { catalog, request, result } = validBuild();
+    result.candidate!.skill_levels.reverse();
+    expect(() => validateBrowserSolverResult(catalog, request, result)).not.toThrow();
+    const duplicate = structuredClone(result);
+    duplicate.candidate!.skill_levels.push({ ...duplicate.candidate!.skill_levels[0]! });
+    expect(() => validateBrowserSolverResult(catalog, request, duplicate)).toThrow("duplicate skill ID");
+    result.candidate!.skill_levels[0]!.level += 1;
+    expect(() => validateBrowserSolverResult(catalog, request, result)).toThrow("computed skill totals");
+  });
+  it("accepts legal tied jewel assignments and order while preserving slot validation", () => {
+    const catalog = decodeBrowserSearchCatalog(makeTestCatalog({
+      equipment: { head: [{ equipment_id: "head", slots: [["armor", 1], ["armor", 1]] }] },
+      decorations: [
+        { decoration_id: "z", display_name: null, required_slot: ["armor", 1], skills: [[0, 1]] },
+        { decoration_id: "a", display_name: null, required_slot: ["armor", 1], skills: [[1, 1]] },
+      ],
+    }));
+    const request = { requirements: [{ skill_id: "skill:attack", min_level: 2 }, { skill_id: "skill:affinity", min_level: 1 }], preferences: [], max_results: 1 };
+    const result = solveBrowserRankedSearch(catalog, request);
+    expect(result.candidate?.placements).toHaveLength(2);
+    for (const placement of result.candidate!.placements) placement.slot_index = 1 - placement.slot_index;
+    // Python's catalog-order tie puts z before a; browser's own tie puts a first.
+    result.candidate!.placements.reverse();
+    expect(() => validateBrowserSolverResult(catalog, request, result)).not.toThrow();
+    result.candidate!.placements[1]!.slot_index = result.candidate!.placements[0]!.slot_index;
+    expect(() => validateBrowserSolverResult(catalog, request, result)).toThrow("more than once");
+  });
+  it("accepts recursively reordered JSON object keys but rejects altered values and arrays", () => {
+    const { catalog, request, result } = validBuild();
+    const reverseKeys = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(reverseKeys);
+      if (value !== null && typeof value === "object") {
+        return Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reverseKeys(child)]));
+      }
+      return value;
+    };
+    const reordered = reverseKeys(result) as typeof result;
+    expect(equalJsonValue(result, reordered)).toBe(true);
+    expect(() => validateBrowserSolverResult(catalog, request, reordered)).not.toThrow();
+    reordered.candidate!.equipment[0]!.display_name = "altered";
+    expect(() => validateBrowserSolverResult(catalog, request, reordered)).toThrow("$.candidate.equipment");
+    expect(equalJsonValue({ a: 1 }, { a: 1, b: null })).toBe(false);
+    expect(equalJsonValue([1, 2], [2, 1])).toBe(false);
+    expect(equalJsonValue([], {})).toBe(false);
+  });
   it("validates full candidate shape, skill levels, score, and count", () => {
     const { catalog, request, result } = validBuild();
 

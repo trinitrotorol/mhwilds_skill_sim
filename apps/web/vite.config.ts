@@ -67,6 +67,9 @@ export default defineConfig({
     },
   },
   test: {
+    isolate: process.env.VITEST_REUSE_ENV !== "1",
+    pool: "threads",
+    maxWorkers: 1,
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],

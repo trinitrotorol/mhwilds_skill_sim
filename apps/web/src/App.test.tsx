@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchCatalogMetadata, searchRankedBuilds } from "./api";
+import { fetchCatalogMetadata, searchRankedBuilds } from "./service/search";
 import App from "./App";
 import type {
   CatalogMetadataResponse,
@@ -11,7 +11,7 @@ import type {
   RankedSearchResponse,
 } from "./types";
 
-vi.mock("./api", () => ({
+vi.mock("./service/search", () => ({
   fetchCatalogMetadata: vi.fn(),
   searchRankedBuilds: vi.fn(),
 }));
@@ -405,7 +405,7 @@ describe("form", () => {
         max_results: 7,
         weapon_kind: "long-sword",
       },
-      { signal: expect.any(AbortSignal) },
+      expect.objectContaining({ signal: expect.any(AbortSignal), engine: "browser", owned: false }),
     );
 
     fireEvent.submit(form!);
@@ -538,7 +538,7 @@ describe("search states and results", () => {
     await user.click(await screen.findByRole("button", { name: "検索する" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "検索に失敗しました。時間をおいてもう一度お試しください。",
+      "backend failure",
     );
     expect(screen.queryByRole("heading", { name: "候補 1" })).not.toBeInTheDocument();
   });
@@ -557,5 +557,31 @@ describe("search states and results", () => {
     expect(searchSignal?.aborted).toBe(false);
     unmount();
     expect(searchSignal?.aborted).toBe(true);
+  });
+
+  it("allows immediate search after cancel and ignores old progress and results", async () => {
+    const first = deferred<RankedSearchResponse>();
+    const second = deferred<RankedSearchResponse>();
+    searchRankedBuildsMock.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: "検索する" }));
+    const oldOptions = searchRankedBuildsMock.mock.calls[0]?.[1];
+    act(() => {
+      oldOptions?.onEngine?.("browser");
+      oldOptions?.onProgress?.({ elapsed_ms: 4000, visited_nodes: 123, pruned_nodes: 0, complete_equipment_selections: 0, preference_score: null, decoration_count: null });
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("4秒・123件探索");
+    fireEvent.click(screen.getByRole("button", { name: "検索を中断" }));
+    expect(oldOptions?.signal?.aborted).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "検索する" }));
+    expect(searchRankedBuildsMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("status")).not.toHaveTextContent("123件探索");
+    act(() => { oldOptions?.onProgress?.({ elapsed_ms: 9000, visited_nodes: 999, pruned_nodes: 0, complete_equipment_selections: 0, preference_score: null, decoration_count: null }); });
+    expect(screen.getByRole("status")).not.toHaveTextContent("999件探索");
+    await act(async () => first.resolve({ candidates: [FIRST_CANDIDATE], exhausted: true, timed_out: false }));
+    expect(screen.queryByRole("heading", { name: "候補 1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "検索中…" })).toBeDisabled();
+    await act(async () => second.resolve(EMPTY_EXHAUSTED));
+    expect(await screen.findByText("条件を満たす装備構成が見つかりませんでした。")).toBeInTheDocument();
   });
 });

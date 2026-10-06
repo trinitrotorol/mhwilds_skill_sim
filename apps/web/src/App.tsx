@@ -9,7 +9,8 @@ import {
   type SetStateAction,
 } from "react";
 
-import { fetchCatalogMetadata, searchRankedBuilds } from "./api";
+import { fetchCatalogMetadata, searchRankedBuilds, type Engine, type InventoryAcknowledgment } from "./service/search";
+import { InventoryNotice } from "./service/InventoryNotice";
 import type {
   CatalogMetadataResponse,
   RankedSearchRequestPayload,
@@ -363,6 +364,12 @@ export default function App() {
   const [weaponKind, setWeaponKind] = useState("");
   const [maxResults, setMaxResults] = useState("5");
   const [isSearching, setIsSearching] = useState(false);
+  const [owned, setOwned] = useState(false);
+  const [inventoryConfirmation, setInventoryConfirmation] = useState<InventoryAcknowledgment | null>(null);
+  const [acknowledgeExclusions, setAcknowledgeExclusions] = useState<InventoryAcknowledgment | null>(null);
+  const [engine, setEngine] = useState<Engine>("browser");
+  const [activeEngine, setActiveEngine] = useState<string>("");
+  const [progress, setProgress] = useState<string>("");
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResponse, setSearchResponse] =
     useState<RankedSearchResponse | null>(null);
@@ -572,10 +579,17 @@ export default function App() {
     setIsSearching(true);
     setSearchError(null);
     setSearchResponse(null);
+    setActiveEngine("");
+    setProgress("");
 
     try {
       const response = await searchRankedBuilds(payload, {
         signal: controller.signal,
+        owned,
+        acknowledgeExclusions,
+        engine,
+        onEngine: (value) => { if (!controller.signal.aborted && searchControllerRef.current === controller) setActiveEngine(value === "browser" ? "ブラウザ内計算" : "サーバー計算"); },
+        onProgress: (value) => { if (!controller.signal.aborted && searchControllerRef.current === controller) setProgress(`${Math.round(value.elapsed_ms / 1000)}秒・${value.visited_nodes.toLocaleString()}件探索`); },
       });
       if (!controller.signal.aborted) {
         setSearchResponse(response);
@@ -583,7 +597,7 @@ export default function App() {
     } catch (error: unknown) {
       if (!isAbortError(error) && !controller.signal.aborted) {
         setSearchError(
-          "検索に失敗しました。時間をおいてもう一度お試しください。",
+          error instanceof Error ? error.message : "検索に失敗しました。時間をおいてもう一度お試しください。",
         );
       }
     } finally {
@@ -597,10 +611,12 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">本文へ移動</a>
       <header className="site-header">
         <div className="header-content">
           <p className="eyebrow">装備構成検索</p>
           <h1>MHWILDS スキルシミュレータ</h1>
+          <nav aria-label="サービス"><a href="/game-guide/mhwilds-inventory-checker/">所持品チェッカーへ</a></nav>
           <ul className="lead">
             <li>必須スキルはすべて満たす</li>
             <li>
@@ -616,7 +632,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="main-content">
+      <main className="main-content" id="main-content">
         {metadataStatus === "loading" && (
           <section aria-live="polite" className="state-card">
             <h2>データを読み込んでいます…</h2>
@@ -744,6 +760,19 @@ export default function App() {
                 />
 
                 <div className="submit-row">
+                  <fieldset className="form-section">
+                    <legend>所持品と計算方法</legend>
+                    <label><input type="checkbox" checked={owned} onChange={(event) => { setOwned(event.currentTarget.checked); setAcknowledgeExclusions(null); }} />所持品を考慮する</label>
+                    <p>チェッカーと同じブラウザ内の保存データを使用します。未登録の装飾品は0個、護石は所持している個体のみを検索します。</p>
+                    {owned && <InventoryNotice onStateChange={setInventoryConfirmation} />}
+                    {owned && <label><input type="checkbox" disabled={!inventoryConfirmation} checked={Boolean(inventoryConfirmation && acknowledgeExclusions?.raw === inventoryConfirmation.raw && acknowledgeExclusions?.catalogRevision === inventoryConfirmation.catalogRevision)} onChange={(event) => setAcknowledgeExclusions(event.currentTarget.checked ? inventoryConfirmation : null)} />カタログ変更を確認し、現在使えない所持品を検索から除外する（保存データは保持）</label>}
+                    <label htmlFor="search-engine">計算方法</label>
+                    <select id="search-engine" value={engine} onChange={(event) => setEngine(event.currentTarget.value as Engine)}>
+                      <option value="browser">ブラウザ内で計算する</option>
+                      <option value="auto">利用可能ならサーバー、利用できなければブラウザ</option>
+                    </select>
+                    <p>サーバー検索が有効な場合のみ、検索に必要なスキル・所持数・護石能力を送信します。プロフィールID・名前・更新日時は送信しません。追加費用を防ぐため現在の公開設定はブラウザ計算です。</p>
+                  </fieldset>
                   <button
                     className="primary-button submit-button"
                     disabled={!formValid || isSearching}
@@ -751,7 +780,9 @@ export default function App() {
                   >
                     {isSearching ? "検索中…" : "検索する"}
                   </button>
+                  {isSearching && <button type="button" onClick={() => { searchControllerRef.current?.abort(); searchControllerRef.current = null; searchInFlightRef.current = false; setIsSearching(false); setProgress("検索を中断しました。"); }}>検索を中断</button>}
                 </div>
+                <p role="status">{activeEngine}{progress && `・${progress}`}</p>
               </section>
             </form>
 
