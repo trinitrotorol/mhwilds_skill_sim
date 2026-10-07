@@ -19,12 +19,11 @@ from mhwilds_skill_sim.catalog.checker_export import (
 )
 from mhwilds_skill_sim.catalog.loader import load_catalog
 from scripts.merge_appraisal_rules import merge_files
+from scripts.service_html import CHECKER_PATH, SIM_PATH, enrich_release_apps
 from scripts.sync_mhdb_catalog import sync_files
 from scripts.sync_appraisal_sheet import sync_files as sync_appraisal
 
 ROOT = Path(__file__).resolve().parents[1]
-SIM_PATH = "game-guide/mhwilds-skill-sim"
-CHECKER_PATH = "game-guide/mhwilds-inventory-checker"
 
 
 def write_json(path: Path, value: object) -> bytes:
@@ -140,6 +139,7 @@ def build_service(
     output = staging / "assets"
     shutil.copytree(ROOT / "apps/web/dist" / SIM_PATH, output / SIM_PATH)
     shutil.copytree(child / "dist", output / CHECKER_PATH)
+    enrich_release_apps(output)
     sim = output / SIM_PATH
     compact_bytes = write_json(sim / "browser-solver/catalog.json", compact)
     compact_hash = hashlib.sha256(compact_bytes).hexdigest()

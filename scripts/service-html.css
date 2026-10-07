@@ -1,0 +1,74 @@
+/* Visible release-page context. Keep selectors independent of either React app. */
+.service-context-nav,
+.service-script-notice,
+.service-page-details {
+  box-sizing: border-box;
+  width: calc(100% - 2rem);
+  max-width: 1200px;
+  margin-inline: auto;
+  color: #1a1a1a;
+  background: #fff;
+  font-family: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI", Meiryo, sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.service-context-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1.5rem;
+  padding-block: .5rem;
+  border-bottom: 1px solid #d9d9d9;
+}
+.service-context-nav a:first-child { font-weight: 700; }
+.service-context-nav a,
+.service-script-notice a,
+.service-page-details a {
+  color: #0017c1;
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+.service-context-nav a,
+.service-script-notice a,
+.service-related-links a,
+.service-information-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  padding-block: .5rem;
+}
+.service-context-nav a:visited,
+.service-script-notice a:visited,
+.service-page-details a:visited { color: #6500a8; }
+.service-context-nav a:hover,
+.service-script-notice a:hover,
+.service-page-details a:hover { color: #000f85; text-decoration-thickness: 2px; }
+.service-context-nav a:focus-visible,
+.service-script-notice a:focus-visible,
+.service-page-details a:focus-visible {
+  outline: 4px solid #000;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #ffd43d;
+}
+.service-page-details {
+  margin-block: 2rem;
+  padding-block: 2rem;
+  border-top: 4px solid #0017c1;
+}
+.service-page-details h2 { margin: 0 0 1rem; font-size: 1.5rem; line-height: 1.5; }
+.service-page-details h3 { margin: 1.5rem 0 .5rem; font-size: 1.125rem; line-height: 1.5; }
+.service-page-details p { margin-block: .75rem; max-width: 52rem; }
+.service-page-details ol { max-width: 52rem; padding-inline-start: 1.75rem; }
+.service-page-details li { margin-block: .5rem; }
+.service-related-links { display: flex; flex-direction: column; align-items: start; gap: .5rem; }
+.service-page-details .service-independence { margin-top: 1.5rem; color: #595959; font-size: 14px; }
+.service-information-links { display: flex; flex-wrap: wrap; gap: 0 1.5rem; padding: 0; list-style: none; }
+.service-information-links li { margin: 0; }
+.service-script-notice { padding: 1rem; border: 1px solid #949494; }
+.service-script-notice h1 { margin: 0 0 1rem; font-size: 1.5rem; line-height: 1.5; }
+@media (forced-colors: active) {
+  .service-context-nav a:focus-visible,
+  .service-script-notice a:focus-visible,
+  .service-page-details a:focus-visible { outline-color: Highlight; }
+}

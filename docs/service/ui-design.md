@@ -14,6 +14,15 @@
 確認資料の公開版はv2.18.0（確認日2026-10-06）。実際のa11y・viewport検証結果は
 リリース検証記録を参照する。
 
+2026-10-07のサイト改善では、公開用HTMLに両アプリ固有のタイトル・説明・canonical・
+Open Graph情報を設定し、サイト案内と使い方・制約・保存方法の説明を追加する。
+説明はReactの操作領域の外にある通常の可視コンテンツで、JavaScript無効時にも読める。
+検索エンジンだけに見せる文章や、広告・外部解析スクリプトは追加しない。
+生成処理は `scripts/service_html.py`、見た目は各アプリ内へ配信する
+`scripts/service-html.css` に集約する。JavaScript有効時はアプリのmain・h1を保ち、
+無効時だけnoscript内にmain・h1と説明へのリンクを表示する。サイト情報は
+名前のあるsectionとnavにする。canonicalはpreview環境でも本番の正規URLを指す。
+
 WSLのWindows側ファイルシステムでVitestのDOM環境起動がタイムアウトする場合は、
 `VITEST_REUSE_ENV=1 ./scripts/npmw --prefix apps/web run test` で全テストを環境再利用で実行できる。
 通常実行とCIではテストファイルの分離を維持する。
