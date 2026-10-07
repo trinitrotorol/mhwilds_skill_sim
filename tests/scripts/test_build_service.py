@@ -24,7 +24,12 @@ def prepare_release(tmp_path, monkeypatch):
     schema.write_text('{"type":"object"}', encoding="utf-8")
     for dist in [workspace / "apps/web/dist" / script.SIM_PATH, child / "dist"]:
         dist.mkdir(parents=True)
-        (dist / "index.html").write_text("built", encoding="utf-8")
+        (dist / "index.html").write_text(
+            '<!doctype html><html lang="ja"><head><title>Application</title></head>'
+            '<body><div id="root"></div><script type="module" '
+            'src="./assets/app.js"></script></body></html>',
+            encoding="utf-8",
+        )
 
     def read(name):
         return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
@@ -85,6 +90,13 @@ def test_publication_records_provided_rule_hash_and_actual_feature_availability(
     }
     assert result["catalog_revision"] == published["catalog_revision"]
     assert (output / script.CHECKER_PATH / "index.html").is_file()
+    for app_path in [script.SIM_PATH, script.CHECKER_PATH]:
+        html = (output / app_path / "index.html").read_text(encoding="utf-8")
+        assert f"https://trinitrotorol.com/{app_path}/" in html
+        assert 'id="service-overview"' in html
+        assert len(list((output / app_path / "assets").glob("service-info-*.css"))) == 1
+    assert "style-src 'self'" in (output / "_headers").read_text()
+    assert "unsafe-inline" not in (output / "_headers").read_text()
     pointer = json.loads((workspace / ".build/service-current.json").read_text())
     assert pointer["manifest"] == published
 

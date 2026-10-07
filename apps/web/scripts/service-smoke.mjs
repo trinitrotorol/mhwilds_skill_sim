@@ -343,6 +343,48 @@ try {
       }
     } finally { await zoomContext.close(); }
   });
+  await step("visible service context and canonical metadata without JavaScript", async () => {
+    const requiredLinks = ["/", "/game-guide/", "/game-guide/mhwilds-guide/", "/about/", "/privacy/", "/contact/"];
+    const metadata = [];
+    const noScriptContext = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 568 }, locale: "ja-JP" });
+    await track(noScriptContext);
+    try {
+      for (const [kind, page] of [["checker", checker], ["sim", sim]]) {
+        assert.equal(await page.locator("main").count(), 1, `${kind}: exactly one application main landmark`);
+        assert.equal(await page.locator("h1").count(), 1, `${kind}: exactly one application h1`);
+        await page.locator("#service-overview").scrollIntoViewIfNeeded();
+        await page.screenshot({ path: resolve(output, `${kind}-320-service-context.png`), fullPage: false });
+        const noScriptPage = await noScriptContext.newPage(); activePage = noScriptPage;
+        const response = await noScriptPage.goto(`${origin}${paths[kind]}`, { waitUntil: "load" });
+        assert.equal(response.status(), 200);
+        assert.equal(await noScriptPage.locator("#root > *").count(), 0, "Application JavaScript is disabled for this check");
+        assert.equal(await noScriptPage.locator("main").count(), 1, `${kind}: one no-JavaScript main landmark`);
+        assert.equal(await noScriptPage.locator("h1").count(), 1, `${kind}: one no-JavaScript application heading`);
+        assert(await noScriptPage.getByRole("heading", { level: 1 }).isVisible());
+        assert(await noScriptPage.locator("#service-overview").isVisible());
+        assert(await noScriptPage.locator(".service-script-notice").isVisible());
+        const title = await noScriptPage.title();
+        const description = await noScriptPage.locator('meta[name="description"]').getAttribute("content");
+        const canonical = `https://trinitrotorol.com${paths[kind]}`;
+        assert(title.includes("モンハンワイルズ"));
+        assert(description.length > 50);
+        assert.equal(await noScriptPage.locator('link[rel="canonical"]').getAttribute("href"), canonical);
+        assert.equal(await noScriptPage.locator('meta[property="og:url"]').getAttribute("content"), canonical);
+        assert.equal(await noScriptPage.locator('meta[property="og:title"]').getAttribute("content"), title);
+        const hrefs = await noScriptPage.locator("a[href]").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+        for (const href of requiredLinks) assert(hrefs.includes(href), `${kind}: missing crawlable ${href}`);
+        assert(hrefs.includes(paths[kind === "checker" ? "sim" : "checker"]));
+        await layout(noScriptPage, `${kind}-320-no-javascript`);
+        await noScriptPage.locator("#service-overview").scrollIntoViewIfNeeded();
+        await noScriptPage.screenshot({ path: resolve(output, `${kind}-320-no-javascript-guide.png`), fullPage: false });
+        metadata.push({ kind, title, description, canonical, noJavaScript: true, requiredLinks });
+        await noScriptPage.close();
+      }
+    } finally { await noScriptContext.close(); }
+    assert.notEqual(metadata[0].title, metadata[1].title);
+    assert.notEqual(metadata[0].description, metadata[1].description);
+    return metadata;
+  });
   activePage = sim;
   await step("cancel active search and stay responsive", async () => {
     await sim.setViewportSize({ width: 1440, height: 900 });
