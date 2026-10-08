@@ -1,6 +1,7 @@
 # MHWILDS スキルシミュレータ Web
 
-ranked CP-SAT検索APIを利用する、React + TypeScript + Vite製のWebクライアントです。
+React + TypeScript + Vite製のWebクライアントです。本番の装備検索は
+ブラウザ内のWeb Workerで動作し、remote検索APIは初期無効です。
 
 ## ローカル開発
 
@@ -17,7 +18,8 @@ npm --prefix apps/web ci
 npm --prefix apps/web run dev
 ```
 
-Viteはapplication API prefix
+Viteの既定baseは旧URLを維持しています。`VITE_BASE_PATH=/skill-sim/`を指定すると
+新しい公開先のbaseで起動・buildします。Viteは選択したbaseのapplication API prefix
 `/game-guide/mhwilds-skill-sim/api`の既知のendpointだけを
 `http://127.0.0.1:8000`へproxyし、backendのpathへrewriteします。browserからはproductionと同じsame-origin URLを使用するため、CORS設定は不要です。
 
@@ -94,16 +96,21 @@ npm --prefix apps/web run build
 
 ## Production
 
-production base pathは`/game-guide/mhwilds-skill-sim/`です。build結果は
-`apps/web/dist/game-guide/mhwilds-skill-sim/`へ生成され、Cloudflare WorkerのStatic Assetsとして配信されます。
+本体は`https://mhwilds.trinitrotorol.com/skill-sim/`です。所持品チェッカーは
+同じオリジンの`/inventory/`で、保存した所持情報を共有します。
+`VITE_BASE_PATH=/skill-sim/`のbuild結果は`apps/web/dist/skill-sim/`に生成します。
+既定値でbuildした旧版は`apps/web/dist/game-guide/mhwilds-skill-sim/`に生成します。
+一括release buildは両版と子チェッカーを同じ固定ソースから生成してStatic Assetsで配信します。
 
-production backendが未設定でmetadata endpointから規定の503 responseが返った場合、画面はmock結果を生成せず「検索APIを準備しています」と表示します。
+旧`.com/game-guide/mhwilds-skill-sim/`は新URLへ301転送します。
+旧所持情報は自動で移せないため、旧ページの`?legacy=1`から旧チェッカーを開き、
+JSONをダウンロードして新チェッカーで復元できます。旧オリジンの保存データは保持します。
 
-production APIは、既存frontend routeよりspecificな
-`trinitrotorol.com/game-guide/mhwilds-skill-sim/api/*`を専用Worker
-`mhwilds-skill-sim-api`へ割り当てます。このAPI Workerが未deploy、またはspecific routeが未設定の場合は、既存frontend WorkerがAPI pathを受けて従来の503 fallbackを返します。productionで`API_ORIGIN`を設定する必要はありません。
-
-frontendの既存Cloudflare Git integrationは維持し、APIは別のmanual GitHub Actions workflow
-`.github/workflows/deploy-cloudflare-api.yml`からだけdeployします。deploy後はhealth、non-emptyなCatalog metadata、empty requirements/preferencesかつ`max_results=1`のranked検索を確認し、公開画面をdesktop `1440 x 900`とmobile `390 x 844`の実browserで検証します。
+実カタログ、release manifest、検索用データは同一オリジンの静的ファイルから読みます。
+releaseの`remote_enabled`はfalseで、有料のContainerや別API Workerは公開しません。
+旧・新baseの限定APIパスは未設定の503を返し、ブラウザ検索はそれらへ通信しません。
+frontendの既存Cloudflare Git integrationは維持しています。
+公開後は新旧URL、JSON移行、ブラウザ検索、モバイル幅、キーボード操作を確認します。
+詳細は[配信と復旧手順](../../docs/service/deployment.md)を参照してください。
 
 `apps/web/dist/`は生成物です。Gitへcommitしません。

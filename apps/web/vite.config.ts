@@ -3,7 +3,9 @@ import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
 import { createBrowserSolverBenchmarkMiddleware } from "./src/browser-solver/vite-benchmark-middleware";
-import { APPLICATION_BASE_PATH } from "./src/lib/paths";
+import { resolveApplicationBasePath } from "./src/lib/paths";
+
+const APPLICATION_BASE_PATH = resolveApplicationBasePath(process.env.VITE_BASE_PATH);
 
 const APPLICATION_API_PREFIX = `${APPLICATION_BASE_PATH}api`;
 const BROWSER_SOLVER_BENCHMARK_CATALOG_PATH = resolve(
@@ -53,7 +55,7 @@ export default defineConfig({
     },
   ],
   build: {
-    outDir: "dist/game-guide/mhwilds-skill-sim",
+    outDir: `dist${APPLICATION_BASE_PATH.slice(0, -1)}`,
     emptyOutDir: true,
     sourcemap: false,
   },

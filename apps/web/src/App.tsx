@@ -11,6 +11,7 @@ import {
 
 import { fetchCatalogMetadata, searchRankedBuilds, type Engine, type InventoryAcknowledgment } from "./service/search";
 import { InventoryNotice } from "./service/InventoryNotice";
+import { inventoryHref } from "./lib/paths";
 import type {
   CatalogMetadataResponse,
   RankedSearchRequestPayload,
@@ -616,7 +617,7 @@ export default function App() {
         <div className="header-content">
           <p className="eyebrow">装備構成検索</p>
           <h1>MHWILDS スキルシミュレータ</h1>
-          <nav aria-label="サービス"><a href="/game-guide/mhwilds-inventory-checker/">所持品チェッカーへ</a></nav>
+          <nav aria-label="サービス"><a href={inventoryHref(import.meta.env.BASE_URL, window.location.search)}>所持品チェッカーへ</a></nav>
           <ul className="lead">
             <li>必須スキルはすべて満たす</li>
             <li>

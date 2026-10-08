@@ -1,7 +1,8 @@
 /** Fresh-context browser acceptance checks against one locally built real release.
  * Run from the repository root: sh scripts/nodew apps/web/scripts/service-smoke.mjs
  * Optional: --assets .build/service-assets --output .build/service-smoke
- * Remote: --base-url https://trinitrotorol.com (must already be verified).
+ * Remote: --base-url https://mhwilds.trinitrotorol.com (must already be verified).
+ * Legacy export app: --base-url https://trinitrotorol.com or --legacy locally.
  * For a verified workers.dev URL, also set SERVICE_SMOKE_VERIFIED_ORIGIN to
  * that exact HTTPS origin copied from the Cloudflare deployment response.
  * No user browser profiles, remote APIs or persistent browser contexts are used.
@@ -13,7 +14,8 @@ import { resolve, relative, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
-const args = process.argv.slice(2);
+const legacyOption = process.argv.includes("--legacy");
+const args = process.argv.slice(2).filter((arg) => arg !== "--legacy");
 function option(name, fallback) {
   const index = args.indexOf(name);
   if (index === -1) return fallback;
@@ -50,13 +52,16 @@ if (process.platform === "linux" && !process.env.FONTCONFIG_FILE && await stat("
 }
 const { chromium } = await import("playwright");
 const { default: AxeBuilder } = await import("@axe-core/playwright");
-const paths = { checker: "/game-guide/mhwilds-inventory-checker/", sim: "/game-guide/mhwilds-skill-sim/" };
+const canonicalPaths = { checker: "/inventory/", sim: "/skill-sim/" };
+const legacy = legacyOption || (remoteBase && new URL(remoteBase).hostname === "trinitrotorol.com");
+const paths = legacy ? { checker: "/game-guide/mhwilds-inventory-checker/", sim: "/game-guide/mhwilds-skill-sim/" } : canonicalPaths;
+const pagePath = (kind) => `${paths[kind]}${legacy ? "?legacy=1" : ""}`;
 const storageKey = "mhwilds.inventory.profile.v1";
 let origin, server, release;
 if (remoteBase) {
   const url = new URL(remoteBase);
   assert(url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash && !url.port && url.pathname === "/", "Deployment must be a bare HTTPS origin");
-  assert(url.hostname === "trinitrotorol.com" || (url.hostname.endsWith(".workers.dev") && url.origin === process.env.SERVICE_SMOKE_VERIFIED_ORIGIN), "Deployment origin must be the known production domain or exact verified workers.dev origin");
+  assert(["trinitrotorol.com", "mhwilds.trinitrotorol.com"].includes(url.hostname) || (url.hostname.endsWith(".workers.dev") && url.origin === process.env.SERVICE_SMOKE_VERIFIED_ORIGIN), "Deployment origin must be the known production domain or exact verified workers.dev origin");
   origin = url.origin;
   const response = await fetch(`${origin}${paths.sim}release.json`, { redirect: "error", signal: AbortSignal.timeout(30_000), headers: { Accept: "application/json" } });
   assert.equal(response.status, 200, "Remote release manifest unavailable");
@@ -139,7 +144,7 @@ async function track(context) {
   });
 }
 async function ready(page, kind) {
-  await page.goto(`${origin}${paths[kind]}`, { waitUntil: "networkidle" });
+  await page.goto(`${origin}${pagePath(kind)}`, { waitUntil: "networkidle" });
   console.log("Navigation ready", kind);
   if (kind === "checker") {
     await page.locator('.quantity-control input').first().waitFor({ state: "attached" });
@@ -344,7 +349,7 @@ try {
     } finally { await zoomContext.close(); }
   });
   await step("visible service context and canonical metadata without JavaScript", async () => {
-    const requiredLinks = ["/", "/game-guide/", "/game-guide/mhwilds-guide/", "/about/", "/privacy/", "/contact/"];
+    const requiredLinks = ["/", "/game-guide/", "/game-guide/mhwilds-guide/", "/about/", "/privacy/", "/contact/"].map((path) => `https://trinitrotorol.com${path}`);
     const metadata = [];
     const noScriptContext = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 568 }, locale: "ja-JP" });
     await track(noScriptContext);
@@ -355,7 +360,7 @@ try {
         await page.locator("#service-overview").scrollIntoViewIfNeeded();
         await page.screenshot({ path: resolve(output, `${kind}-320-service-context.png`), fullPage: false });
         const noScriptPage = await noScriptContext.newPage(); activePage = noScriptPage;
-        const response = await noScriptPage.goto(`${origin}${paths[kind]}`, { waitUntil: "load" });
+        const response = await noScriptPage.goto(`${origin}${pagePath(kind)}`, { waitUntil: "load" });
         assert.equal(response.status(), 200);
         assert.equal(await noScriptPage.locator("#root > *").count(), 0, "Application JavaScript is disabled for this check");
         assert.equal(await noScriptPage.locator("main").count(), 1, `${kind}: one no-JavaScript main landmark`);
@@ -365,7 +370,7 @@ try {
         assert(await noScriptPage.locator(".service-script-notice").isVisible());
         const title = await noScriptPage.title();
         const description = await noScriptPage.locator('meta[name="description"]').getAttribute("content");
-        const canonical = `https://trinitrotorol.com${paths[kind]}`;
+        const canonical = `https://mhwilds.trinitrotorol.com${canonicalPaths[kind]}`;
         assert(title.includes("モンハンワイルズ"));
         assert(description.length > 50);
         assert.equal(await noScriptPage.locator('link[rel="canonical"]').getAttribute("href"), canonical);
@@ -373,7 +378,9 @@ try {
         assert.equal(await noScriptPage.locator('meta[property="og:title"]').getAttribute("content"), title);
         const hrefs = await noScriptPage.locator("a[href]").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
         for (const href of requiredLinks) assert(hrefs.includes(href), `${kind}: missing crawlable ${href}`);
-        assert(hrefs.includes(paths[kind === "checker" ? "sim" : "checker"]));
+        assert(hrefs.includes(pagePath(kind === "checker" ? "sim" : "checker")));
+        assert(await noScriptPage.locator(".service-migration-notice").isVisible());
+        assert(hrefs.includes("https://trinitrotorol.com/game-guide/mhwilds-inventory-checker/?legacy=1"));
         await layout(noScriptPage, `${kind}-320-no-javascript`);
         await noScriptPage.locator("#service-overview").scrollIntoViewIfNeeded();
         await noScriptPage.screenshot({ path: resolve(output, `${kind}-320-no-javascript-guide.png`), fullPage: false });

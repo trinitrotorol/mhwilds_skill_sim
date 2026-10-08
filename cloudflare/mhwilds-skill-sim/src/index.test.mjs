@@ -26,7 +26,7 @@ try {
 
 const ORIGIN = "https://preview.example.test:8787";
 const API_ORIGIN = "https://api.example.test";
-const APPLICATION_PATH = "/game-guide/mhwilds-skill-sim";
+const APPLICATION_PATH = "/skill-sim";
 const APPLICATION_PATH_WITH_SLASH = `${APPLICATION_PATH}/`;
 const ASSET_PATH = `${APPLICATION_PATH}/assets/index-Abc_def9.js`;
 const API_PATH = `${APPLICATION_PATH}/api`;
@@ -253,11 +253,12 @@ test("missing, invalid, failed, or malformed ASSETS bindings return stable 500",
   }
 });
 
-test("root, existing guide, and unknown application children remain 404", async () => {
+test("existing guide and unknown application children remain 404", async () => {
   const paths = [
-    "/",
     "/game-guide/",
     "/game-guide/exponential-idle-minigame-guide",
+    "/game-guide/mhwilds-skill-sim-other?legacy=1",
+    "/game-guide/mhwilds-inventory-checker-other/?x=1",
     `${APPLICATION_PATH}/unknown`,
     `${APPLICATION_PATH}/assets-other/index-Abcdef12.js`,
   ];
@@ -708,15 +709,25 @@ test("wrangler config preserves Worker identity and declares one safe asset coll
     command:
       "sh scripts/build-service-release.sh",
   });
-  assert.deepEqual(config.assets, {
-    directory: ".build/service-assets",
-    binding: "ASSETS",
-    run_worker_first: ["/game-guide/mhwilds-skill-sim", "/game-guide/mhwilds-inventory-checker", "/game-guide/mhwilds-skill-sim/api/*"],
-    html_handling: "auto-trailing-slash",
-    not_found_handling: "none",
-  });
-
-  assert.equal(Object.hasOwn(config, "routes"), false);
+  assert.equal(config.assets.directory, ".build/service-assets");
+  assert.equal(config.assets.binding, "ASSETS");
+  assert.equal(config.assets.html_handling, "auto-trailing-slash");
+  // Real static assets must stay assets-first; only page redirects and APIs execute code.
+  assert(!config.assets.run_worker_first.includes("/*"));
+  assert(config.assets.run_worker_first.every((path) => !path.includes("*") || path.endsWith("/api/*")));
+  for (const path of ["/", "/index.html", "/skill-sim", "/skill-sim/index.html", "/inventory", "/inventory/index.html", "/skill-sim/api/*", "/game-guide/mhwilds-skill-sim/api/*"]) {
+    assert(config.assets.run_worker_first.includes(path), path);
+  }
+  for (const path of ["/game-guide/mhwilds-skill-sim", "/game-guide/mhwilds-inventory-checker"]) {
+    for (const suffix of ["", "/", "/index.html"]) assert(config.assets.run_worker_first.includes(path + suffix), path + suffix);
+  }
+  assert.deepEqual(config.routes, [
+    { pattern: "trinitrotorol.com/game-guide/mhwilds-skill-sim*", zone_name: "trinitrotorol.com" },
+    { pattern: "trinitrotorol.com/game-guide/mhwilds-skill-sim/*", zone_name: "trinitrotorol.com" },
+    { pattern: "trinitrotorol.com/game-guide/mhwilds-inventory-checker*", zone_name: "trinitrotorol.com" },
+    { pattern: "trinitrotorol.com/game-guide/mhwilds-inventory-checker/*", zone_name: "trinitrotorol.com" },
+    { pattern: "mhwilds.trinitrotorol.com", custom_domain: true },
+  ]);
   assert.equal(Object.hasOwn(config, "route"), false);
   assert.equal(Object.hasOwn(config, "account_id"), false);
   assert.equal(Object.hasOwn(config, "zone_id"), false);
@@ -726,6 +737,59 @@ test("wrangler config preserves Worker identity and declares one safe asset coll
   assert.equal(config.assets.not_found_handling, "none");
 });
 
+test("old pages redirect permanently to the new host while preserving the entire query", async () => {
+  for (const [old, current] of [["mhwilds-skill-sim", "skill-sim"], ["mhwilds-inventory-checker", "inventory"]]) {
+    for (const suffix of ["", "/", "/index.html"]) {
+      for (const method of ["GET", "HEAD"]) {
+        const response = await worker.fetch(new Request(`https://trinitrotorol.com/game-guide/${old}${suffix}${QUERY}`, { method }), {});
+        assert.equal(response.status, 301);
+        assert.equal(response.headers.get("location"), `https://mhwilds.trinitrotorol.com/${current}/${QUERY}`);
+        assert.equal(response.headers.get("cache-control"), "no-store");
+        assert.equal(response.body, null);
+      }
+    }
+  }
+});
+
+test("legacy=1 serves the old origin app and never redirects away from saved inventory", async () => {
+  for (const name of ["mhwilds-skill-sim", "mhwilds-inventory-checker"]) {
+    const assets = createAssets(() => new Response("legacy export app"));
+    const request = new Request(`https://trinitrotorol.com/game-guide/${name}/?legacy=1&x=2`);
+    const response = await worker.fetch(request, { ASSETS: assets.binding });
+    assert.equal(response.status, 200);
+    assert.equal(assets.calls[0], request);
+    assert.equal(await response.text(), "legacy export app");
+    for (const suffix of ["", "/index.html"]) {
+      const redirect = await worker.fetch(new Request(`https://trinitrotorol.com/game-guide/${name}${suffix}?legacy=1&x=2`), {});
+      assert.equal(redirect.status, 308);
+      assert.equal(redirect.headers.get("location"), request.url);
+    }
+  }
+});
+
+test("legacy catalog and asset URLs stay available without the export query", async () => {
+  const base = "/game-guide/mhwilds-skill-sim";
+  for (const path of [`${base}/release.json`, `${base}/catalog/checker-catalog.json`, `${base}/browser-solver/manifest.json`, `${base}/browser-solver/catalog-${"a".repeat(64)}.json`, `${base}/assets/index-Abcdef12.js`, "/game-guide/mhwilds-inventory-checker/assets/index-Abcdef12.js"]) {
+    const response = await worker.fetch(new Request(`https://trinitrotorol.com${path}`), { ASSETS: { fetch: async () => new Response("asset") } });
+    assert.equal(response.status, 200, path);
+  }
+  const response = await worker.fetch(new Request(`https://trinitrotorol.com${base}/api/health`), {});
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { detail: "search API is not configured" });
+});
+
+test("subdomain root redirects to the simulator and serves crawl metadata", async () => {
+  for (const path of ["/", "/index.html"]) {
+    const response = await worker.fetch(new Request(`https://mhwilds.trinitrotorol.com${path}${QUERY}`), {});
+    assert.equal(response.status, 301);
+    assert.equal(response.headers.get("location"), `https://mhwilds.trinitrotorol.com/skill-sim/${QUERY}`);
+  }
+  for (const path of ["/robots.txt", "/sitemap.xml", "/ads.txt"]) {
+    const response = await worker.fetch(new Request(`https://mhwilds.trinitrotorol.com${path}`), { ASSETS: { fetch: async () => new Response("static") } });
+    assert.equal(response.status, 200);
+  }
+});
+
 test("remote search remains closed even when an origin was configured", async () => {
   const response = await worker.fetch(new Request(`${ORIGIN}${RANKED_PATH}`, { method: "POST" }), { API_ORIGIN });
   assert.equal(response.status, 503);
@@ -733,14 +797,14 @@ test("remote search remains closed even when an origin was configured", async ()
 });
 
 test("checker navigation and static catalogs stay within the two application routes", async () => {
-  const paths = ["/game-guide/mhwilds-inventory-checker/", `${APPLICATION_PATH}/catalog/checker-catalog.json`, `${APPLICATION_PATH}/browser-solver/manifest.json`, `${APPLICATION_PATH}/browser-solver/catalog-${"a".repeat(64)}.json`, `${APPLICATION_PATH}/release.json`];
+  const paths = ["/inventory/", `${APPLICATION_PATH}/catalog/checker-catalog.json`, `${APPLICATION_PATH}/browser-solver/manifest.json`, `${APPLICATION_PATH}/browser-solver/catalog-${"a".repeat(64)}.json`, `${APPLICATION_PATH}/release.json`];
   for (const path of paths) {
     const response = await worker.fetch(new Request(`${ORIGIN}${path}`), { ASSETS: { fetch: async () => new Response("asset") } });
     assert.equal(response.status, 200, path);
   }
   const unknown = await worker.fetch(new Request(`${ORIGIN}${APPLICATION_PATH}/missing.json`), {});
   assert.equal(unknown.status, 404);
-  const redirect = await worker.fetch(new Request(`${ORIGIN}/game-guide/mhwilds-inventory-checker?x=1`), {});
+  const redirect = await worker.fetch(new Request(`${ORIGIN}/inventory?x=1`), {});
   assert.equal(redirect.status, 308);
-  assert.equal(redirect.headers.get("Location"), `${ORIGIN}/game-guide/mhwilds-inventory-checker/?x=1`);
+  assert.equal(redirect.headers.get("Location"), `${ORIGIN}/inventory/?x=1`);
 });

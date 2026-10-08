@@ -46,6 +46,21 @@ beforeEach(() => { vi.stubGlobal("crypto", webcrypto); });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("bounded production catalog loading", () => {
+  it("loads catalogs and release metadata entirely under the configured subdomain path", async () => {
+    const previous = import.meta.env.BASE_URL;
+    vi.stubEnv("BASE_URL", "/skill-sim/");
+    try {
+      const fixture = releaseFixture();
+      await loadServiceCatalog(signal(), fixture.fetcher);
+      expect(fixture.fetcher).toHaveBeenCalledTimes(4);
+      for (const [url] of fixture.fetcher.mock.calls) {
+        expect(new URL(String(url)).pathname).toMatch(/^\/skill-sim\//);
+      }
+    } finally {
+      vi.stubEnv("BASE_URL", previous);
+    }
+  });
+
   it("loads only same-origin public catalogs and verifies their revision and hash", async () => {
     const fixture = releaseFixture();
     const result = await loadServiceCatalog(signal(), fixture.fetcher);

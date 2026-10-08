@@ -3,7 +3,6 @@ import { decodeBrowserSearchCatalog } from "../browser-solver/catalog";
 import type { DecodedBrowserCatalog } from "../browser-solver/types";
 import type { CatalogMetadataResponse } from "../types";
 
-const BASE = "/game-guide/mhwilds-skill-sim/";
 export interface ServiceCatalog {
   raw: unknown;
   browser: DecodedBrowserCatalog;
@@ -52,6 +51,7 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 export async function loadServiceCatalog(signal: AbortSignal, fetcher = fetch): Promise<ServiceCatalog> {
+  const base = import.meta.env.BASE_URL;
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
@@ -59,12 +59,12 @@ export async function loadServiceCatalog(signal: AbortSignal, fetcher = fetch): 
   const timer = setTimeout(abort, 30_000);
   try {
     const read = async (path: string, max: number) => object(await boundedJson(path, controller.signal, max, fetcher));
-    const manifest = object((await read(`${BASE}browser-solver/manifest.json`, 16_384)).value);
+    const manifest = object((await read(`${base}browser-solver/manifest.json`, 16_384)).value);
     if (manifest.format_version !== 1 || typeof manifest.catalog_file !== "string" || !/^catalog-[a-f0-9]{64}\.json$/.test(manifest.catalog_file)) throw new Error("カタログmanifestが不正です。");
     const [compact, checkerData, releaseData] = await Promise.all([
-      read(`${BASE}browser-solver/${manifest.catalog_file}`, 25 * 1024 * 1024),
-      read(`${BASE}catalog/checker-catalog.json`, MAX_CATALOG_BYTES),
-      read(`${BASE}release.json`, 16_384),
+      read(`${base}browser-solver/${manifest.catalog_file}`, 25 * 1024 * 1024),
+      read(`${base}catalog/checker-catalog.json`, MAX_CATALOG_BYTES),
+      read(`${base}release.json`, 16_384),
     ]);
     const bytes = compact.bytes as Uint8Array<ArrayBuffer>;
     const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((n) => n.toString(16).padStart(2, "0")).join("");
