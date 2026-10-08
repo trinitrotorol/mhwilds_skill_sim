@@ -122,7 +122,7 @@ test("API Wrangler configuration is exact and contains no secrets", async () => 
   );
 });
 
-test("frontend serves both static services and invokes the worker only for dynamic routes", async () => {
+test("frontend serves both static services and invokes the worker for redirects and API routes", async () => {
   const frontendConfig = JSON.parse(
     await readRepositoryFile("wrangler.jsonc"),
   );
@@ -134,6 +134,7 @@ test("frontend serves both static services and invokes the worker only for dynam
       "main",
       "compatibility_date",
       "workers_dev",
+      "routes",
       "build",
       "assets",
     ],
@@ -144,6 +145,13 @@ test("frontend serves both static services and invokes the worker only for dynam
     main: "cloudflare/mhwilds-skill-sim/src/index.mjs",
     compatibility_date: "2026-07-14",
     workers_dev: true,
+    routes: [
+      { pattern: "trinitrotorol.com/game-guide/mhwilds-skill-sim*", zone_name: "trinitrotorol.com" },
+      { pattern: "trinitrotorol.com/game-guide/mhwilds-skill-sim/*", zone_name: "trinitrotorol.com" },
+      { pattern: "trinitrotorol.com/game-guide/mhwilds-inventory-checker*", zone_name: "trinitrotorol.com" },
+      { pattern: "trinitrotorol.com/game-guide/mhwilds-inventory-checker/*", zone_name: "trinitrotorol.com" },
+      { pattern: "mhwilds.trinitrotorol.com", custom_domain: true },
+    ],
     build: {
       command: "sh scripts/build-service-release.sh",
     },
@@ -151,15 +159,25 @@ test("frontend serves both static services and invokes the worker only for dynam
       directory: ".build/service-assets",
       binding: "ASSETS",
       run_worker_first: [
-        "/game-guide/mhwilds-skill-sim",
-        "/game-guide/mhwilds-inventory-checker",
+        "/",
+        "/index.html",
+        "/skill-sim",
+        "/skill-sim/index.html",
+        "/inventory",
+        "/inventory/index.html",
+        "/skill-sim/api/*",
         "/game-guide/mhwilds-skill-sim/api/*",
+        "/game-guide/mhwilds-skill-sim",
+        "/game-guide/mhwilds-skill-sim/",
+        "/game-guide/mhwilds-skill-sim/index.html",
+        "/game-guide/mhwilds-inventory-checker",
+        "/game-guide/mhwilds-inventory-checker/",
+        "/game-guide/mhwilds-inventory-checker/index.html",
       ],
       html_handling: "auto-trailing-slash",
       not_found_handling: "none",
     },
   });
-  assert.equal("routes" in frontendConfig, false);
   assert.equal("containers" in frontendConfig, false);
   assert.notEqual(frontendConfig.name, "mhwilds-skill-sim-api");
 });
