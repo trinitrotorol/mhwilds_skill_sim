@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -152,8 +153,29 @@ def build_service(
         shutil.copyfile(english_source, english_snapshot)
         english_source = english_snapshot
     english_path = english_source or source_path
+    english_catalog = load_catalog(path=english_path)
+    if fixture:
+        # Tiny CI catalogs intentionally omit display names. Keep their IDs as
+        # fixture labels without weakening production translation coverage.
+        english_catalog = replace(
+            english_catalog,
+            **{
+                collection: tuple(
+                    replace(
+                        item,
+                        display_name=item.display_name or getattr(item, identity),
+                    )
+                    for item in getattr(english_catalog, collection)
+                )
+                for collection, identity in (
+                    ("skills", "skill_id"),
+                    ("equipment", "equipment_id"),
+                    ("decorations", "decoration_id"),
+                )
+            },
+        )
     english_names = build_english_names(
-        catalog=catalog, english_catalog=load_catalog(path=english_path)
+        catalog=catalog, english_catalog=english_catalog
     )
     checker = build_checker_catalog(
         catalog=catalog, revision=revision, generated_at=stamp

@@ -160,6 +160,46 @@ def test_production_snapshot_requires_matching_english_source(tmp_path, monkeypa
     assert not (workspace / ".build").exists()
 
 
+def test_real_tiny_fixture_uses_ids_for_missing_translation_names(
+    tmp_path, monkeypatch
+):
+    workspace, _ = prepare_release(tmp_path, monkeypatch)
+    source = FIXTURES / "tiny_catalog.json"
+    original = source.read_bytes()
+    result = script.build_service(
+        source, fixture=True, generated_at="2026-10-06T00:00:00Z"
+    )
+    output = workspace / ".build/service-assets"
+    names = json.loads((output / script.SIM_PATH / "locales/en.json").read_text())[
+        "names"
+    ]
+    catalog = script.load_catalog(path=source)
+    for collection, identity in (
+        ("skills", "skill_id"),
+        ("equipment", "equipment_id"),
+        ("decorations", "decoration_id"),
+    ):
+        assert names[collection] == {
+            getattr(item, identity): item.display_name or getattr(item, identity)
+            for item in getattr(catalog, collection)
+        }
+    assert result["fixture"] is True
+    assert result["catalog_revision"] == hashlib.sha256(original).hexdigest()
+    assert source.read_bytes() == original
+
+
+def test_production_still_rejects_missing_english_names(tmp_path, monkeypatch):
+    workspace, source = prepare_release(tmp_path, monkeypatch)
+    # Use a normal snapshot path so the production check reaches name coverage.
+    source.write_bytes((FIXTURES / "tiny_catalog.json").read_bytes())
+    with pytest.raises(ValueError, match="English skills names missing"):
+        script.build_service(
+            source, english_source=source, generated_at="2026-10-06T00:00:00Z"
+        )
+    assert not (workspace / ".build/service-assets").exists()
+    assert not (workspace / ".build/service-current.json").exists()
+
+
 def test_english_fixture_requires_explicit_fixture_flag(tmp_path, monkeypatch):
     workspace, source = prepare_release(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="Synthetic English catalogs"):
