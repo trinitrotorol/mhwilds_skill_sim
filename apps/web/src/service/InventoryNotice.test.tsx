@@ -5,6 +5,7 @@ import { createInventoryStore, INVENTORY_STORAGE_KEY } from "../../../../subproj
 import { InventoryNotice } from "./InventoryNotice";
 import { fetchServiceCatalog } from "./search";
 import type { ServiceCatalog } from "./catalog";
+import { LocaleContext, translate } from "../i18n";
 
 // App tests import this component with a different service mock. Re-evaluate
 // its imports when local WSL verification opts into a reused test environment.
@@ -17,6 +18,21 @@ const profile: InventoryProfile = { schema_version: 1, profile_id: "profile", ca
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 
 describe("inventory notices", () => {
+  it("translates an acknowledged inventory without rereading or changing its saved profile", async () => {
+    const raw = exportProfile(profile);
+    localStorage.setItem(INVENTORY_STORAGE_KEY, raw);
+    fetchCatalog.mockResolvedValue(catalog);
+    const changed = vi.fn();
+    const context = { locale: "ja" as const, setLocale: vi.fn(), t: (value: string) => value, name: (_kind: string, id: string, fallback?: string | null) => fallback ?? id };
+    const { rerender } = render(<LocaleContext.Provider value={context}><InventoryNotice onStateChange={changed} /></LocaleContext.Provider>);
+    await waitFor(() => expect(changed).toHaveBeenLastCalledWith({ raw, catalogRevision: "revision" }));
+    const calls = changed.mock.calls.length;
+    rerender(<LocaleContext.Provider value={{ ...context, locale: "en", t: (value) => translate("en", value) }}><InventoryNotice onStateChange={changed} /></LocaleContext.Provider>);
+    expect(screen.getByLabelText("Inventory status")).toHaveTextContent("Inventory saved: 2026-10-06T00:00:00Z.");
+    expect(changed).toHaveBeenCalledTimes(calls);
+    expect(fetchCatalog).toHaveBeenCalledOnce();
+    expect(localStorage.getItem(INVENTORY_STORAGE_KEY)).toBe(raw);
+  });
   it("shares one catalog request and only displays the latest profile after delayed loading", async () => {
     localStorage.setItem(INVENTORY_STORAGE_KEY, exportProfile(profile));
     let complete!: (value: ServiceCatalog) => void;

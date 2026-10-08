@@ -1,7 +1,9 @@
 """Release HTML must remain usable, distinct, crawlable and CSP compatible."""
 
 from dataclasses import replace
+import hashlib
 from html.parser import HTMLParser
+from pathlib import Path
 
 import pytest
 
@@ -96,8 +98,12 @@ def test_each_app_has_unique_canonical_metadata_and_visible_useful_copy(app_path
         for url in links
     )
     assert any("JavaScript" in value for _, value in page.text)
-    assert page.attributes("aside", **{"aria-labelledby": "service-migration-title"})
-    assert f"{script.ROOT_ORIGIN}/{script.LEGACY_CHECKER_PATH}/?legacy=1" in links
+    # The canonical apps no longer generate a migration notice, even when CSS/JS fail.
+    assert not page.attributes("aside")
+    assert "service-migration-title" not in html
+    assert "以前のサイトで所持品を登録した方へ" not in html
+    assert "?legacy=1" not in html
+    assert f"{script.ROOT_ORIGIN}/game-guide/mhwilds-guide/" in links
     assert not page.attributes("meta", name="robots")
 
 
@@ -117,6 +123,9 @@ def test_legacy_export_shell_retains_old_assets_but_points_canonical_to_new_site
     assert f"{script.ORIGIN}/{script.CHECKER_PATH}/" in links
     assert page.attributes("link", href=f"/{old_path}/assets/context.css")
     assert "保存データは残っています" in html
+    assert "Recover inventory saved on the old site" in html
+    assert "not transferred automatically" in html
+    assert page.attributes("aside", **{"aria-labelledby": "service-migration-title"})
     assert page.attributes("script") == Page(SHELL).attributes("script")
 
 
@@ -181,3 +190,95 @@ def test_accidental_second_enrichment_cannot_duplicate_navigation_or_metadata():
     html = script.enrich_html(SHELL, script.SIM_PATH, url)
     with pytest.raises(ValueError, match="unenriched"):
         script.enrich_html(html, script.SIM_PATH, url)
+
+
+@pytest.mark.parametrize("app_path", [*script.PAGES, *script.LEGACY_PATHS])
+def test_translations_share_landmarks_ids_links_and_default_to_japanese(app_path):
+    html = script.enrich_html(SHELL, app_path, f"/{app_path}/assets/context.css")
+    page = Page(html)
+    canonical_path = script.LEGACY_PATHS.get(app_path, app_path)
+    english = script.ENGLISH_PAGES[canonical_path]
+    assert page.attributes("html")[0]["lang"] == "ja"
+    japanese_spans = page.attributes("span", **{"data-service-lang": "ja"})
+    english_spans = page.attributes("span", **{"data-service-lang": "en"})
+    assert len(japanese_spans) == len(english_spans) > 15
+    assert all(attrs["lang"] == "ja" for attrs in japanese_spans)
+    assert all(attrs["lang"] == "en" for attrs in english_spans)
+    ids = [attrs["id"] for _, attrs in page.tags if "id" in attrs]
+    assert len(ids) == len(set(ids))
+    # Hiding a translation cannot leave duplicate headings, landmarks or links.
+    assert len(page.attributes("h1")) == len(page.attributes("main")) == 1
+    assert len(page.attributes("section", id="service-overview")) == 1
+    assert len(page.attributes("h2", id="service-overview-title")) == 1
+    assert english.introduction in [value for _, value in page.text]
+    assert english.limitation in [value for _, value in page.text]
+    description = page.attributes("meta", name="description")[0]
+    assert description["data-service-content-en"] == english.description
+    assert description["data-service-content-ja"] == description["content"]
+    assert page.attributes("title")[0]["data-service-text-en"] == english.title
+    assert (
+        page.attributes("meta", property="og:title")[0]["data-service-content-en"]
+        == english.title
+    )
+    assert (
+        page.attributes("meta", property="og:locale")[0]["data-service-content-en"]
+        == "en_US"
+    )
+    assert all(
+        "data-service-aria-label-en" in attrs for attrs in page.attributes("nav")
+    )
+    stylesheet = Path(script.__file__).with_name("service-html.css").read_text()
+    assert 'html:not([lang="en"]) [data-service-lang="en"]' in stylesheet
+    assert 'html[lang="en"] [data-service-lang="ja"]' in stylesheet
+    assert "display: none !important;" in stylesheet
+
+
+def test_english_editorial_text_cannot_inject_markup_or_attributes(monkeypatch):
+    payload = '"><script src="https://evil.invalid/en.js"></script>&'
+    english = replace(
+        script.ENGLISH_PAGES[script.SIM_PATH],
+        title=payload,
+        description=payload,
+        introduction=payload,
+    )
+    monkeypatch.setitem(script.ENGLISH_PAGES, script.SIM_PATH, english)
+    page = Page(
+        script.enrich_html(SHELL, script.SIM_PATH, "/skill-sim/assets/info.css")
+    )
+    assert page.attributes("script") == Page(SHELL).attributes("script")
+    assert (
+        page.attributes("meta", name="description")[0]["data-service-content-en"]
+        == payload
+    )
+    assert payload in [value for _, value in page.text]
+
+
+def test_release_copies_a_hashed_same_origin_locale_module_for_every_app(tmp_path):
+    module = Path(script.__file__).with_name("service-locale.mjs").read_bytes()
+    name = f"service-locale-{hashlib.sha256(module).hexdigest()[:16]}.js"
+    for app_path in [*script.PAGES, *script.LEGACY_PATHS]:
+        directory = tmp_path / app_path
+        directory.mkdir(parents=True)
+        (directory / "index.html").write_text(SHELL)
+    script.enrich_release_apps(tmp_path)
+    for app_path in [*script.PAGES, *script.LEGACY_PATHS]:
+        directory = tmp_path / app_path
+        page = Page((directory / "index.html").read_text())
+        assert (directory / "assets" / name).read_bytes() == module
+        assert page.attributes("script") == [
+            *Page(SHELL).attributes("script"),
+            {"type": "module", "src": f"/{app_path}/assets/{name}"},
+        ]
+        assert not page.attributes("style")
+        assert not any(key.startswith("on") for _, attrs in page.tags for key in attrs)
+
+
+@pytest.mark.parametrize(
+    "module",
+    ["https://other.invalid/a.js", "//other.invalid/a.js", '/skill-sim/assets/x" y="z'],
+)
+def test_external_or_unscoped_locale_modules_are_rejected(module):
+    with pytest.raises(ValueError, match="assets path"):
+        script.enrich_html(
+            SHELL, script.SIM_PATH, "/skill-sim/assets/context.css", module
+        )

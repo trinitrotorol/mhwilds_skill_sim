@@ -126,6 +126,7 @@ def test_both_origins_build_from_same_pinned_sources_and_catalog(tmp_path, monke
         "release.json",
         "catalog/checker-catalog.json",
         "browser-solver/manifest.json",
+        "locales/en.json",
     ]:
         assert (output / script.SIM_PATH / path).read_bytes() == (
             output / script.LEGACY_SIM_PATH / path
@@ -144,6 +145,56 @@ def test_both_origins_build_from_same_pinned_sources_and_catalog(tmp_path, monke
     sitemap = (output / "sitemap.xml").read_text()
     assert "game-guide" not in sitemap
     assert sitemap.count("<loc>") == 2
+    translations = json.loads(
+        (output / script.SIM_PATH / "locales/en.json").read_text()
+    )
+    assert translations["schema_version"] == 1
+    assert translations["locale"] == "en"
+    assert translations["names"]["skills"]
+
+
+def test_production_snapshot_requires_matching_english_source(tmp_path, monkeypatch):
+    workspace, source = prepare_release(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="english-source"):
+        script.build_service(source, generated_at="2026-10-06T00:00:00Z")
+    assert not (workspace / ".build").exists()
+
+
+def test_english_fixture_requires_explicit_fixture_flag(tmp_path, monkeypatch):
+    workspace, source = prepare_release(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="Synthetic English catalogs"):
+        script.build_service(
+            source,
+            english_source=FIXTURES / "tiny_catalog.json",
+            generated_at="2026-10-06T00:00:00Z",
+        )
+    assert not (workspace / ".build").exists()
+
+
+def test_english_snapshot_hash_matches_used_bytes_even_when_input_changes(
+    tmp_path, monkeypatch
+):
+    workspace, source = prepare_release(tmp_path, monkeypatch)
+    english = tmp_path / "english.json"
+    original = source.read_bytes()
+    english.write_bytes(original)
+    monkeypatch.setattr(
+        script.subprocess,
+        "run",
+        lambda *args, **kwargs: english.write_bytes(b"replaced after loading"),
+    )
+    result = script.build_service(
+        source,
+        fixture=True,
+        english_source=english,
+        generated_at="2026-10-06T00:00:00Z",
+    )
+    assert (
+        result["localization"]["english_source_sha256"]
+        == hashlib.sha256(original).hexdigest()
+    )
+    staged = next((workspace / ".build/service-staging").glob("*/catalog-en.json"))
+    assert staged.read_bytes() == original
 
 
 def test_failed_application_build_keeps_previous_assets_and_release_pointer(

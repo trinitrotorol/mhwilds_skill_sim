@@ -379,8 +379,12 @@ try {
         const hrefs = await noScriptPage.locator("a[href]").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
         for (const href of requiredLinks) assert(hrefs.includes(href), `${kind}: missing crawlable ${href}`);
         assert(hrefs.includes(pagePath(kind === "checker" ? "sim" : "checker")));
-        assert(await noScriptPage.locator(".service-migration-notice").isVisible());
-        assert(hrefs.includes("https://trinitrotorol.com/game-guide/mhwilds-inventory-checker/?legacy=1"));
+        if (legacy) {
+          assert(await noScriptPage.locator(".service-migration-notice").isVisible());
+          assert(hrefs.includes("https://trinitrotorol.com/game-guide/mhwilds-inventory-checker/?legacy=1"));
+        } else {
+          assert.equal(await noScriptPage.locator(".service-migration-notice").count(), 0);
+        }
         await layout(noScriptPage, `${kind}-320-no-javascript`);
         await noScriptPage.locator("#service-overview").scrollIntoViewIfNeeded();
         await noScriptPage.screenshot({ path: resolve(output, `${kind}-320-no-javascript-guide.png`), fullPage: false });

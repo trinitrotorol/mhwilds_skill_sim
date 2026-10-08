@@ -1,4 +1,10 @@
 /* Visible release-page context. Keep selectors independent of either React app. */
+/* display:none also removes the inactive translation from the accessibility tree. */
+html:not([lang="en"]) [data-service-lang="en"],
+html[lang="en"] [data-service-lang="ja"] {
+  display: none !important;
+}
+
 .service-context-nav,
 .service-migration-notice,
 .service-script-notice,
