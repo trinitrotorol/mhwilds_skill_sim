@@ -1,7 +1,15 @@
-const APPLICATION_PATH = "/game-guide/mhwilds-skill-sim";
+const APPLICATION_PATH = "/skill-sim";
 const APPLICATION_PATH_WITH_SLASH = `${APPLICATION_PATH}/`;
-const CHECKER_PATH = "/game-guide/mhwilds-inventory-checker";
-const ASSET_PATH_PREFIX = `${APPLICATION_PATH_WITH_SLASH}assets/`;
+const CHECKER_PATH = "/inventory";
+const LEGACY_APPLICATION_PATH = "/game-guide/mhwilds-skill-sim";
+const LEGACY_CHECKER_PATH = "/game-guide/mhwilds-inventory-checker";
+const CANONICAL_ORIGIN = "https://mhwilds.trinitrotorol.com";
+const APPLICATION_PATHS = [APPLICATION_PATH, LEGACY_APPLICATION_PATH];
+const PAGE_PATHS = [...APPLICATION_PATHS, CHECKER_PATH, LEGACY_CHECKER_PATH];
+const LEGACY_PAGES = new Map([
+  [LEGACY_APPLICATION_PATH, APPLICATION_PATH],
+  [LEGACY_CHECKER_PATH, CHECKER_PATH],
+]);
 
 const API_PATH_PREFIX = `${APPLICATION_PATH}/api`;
 const API_ROUTES = new Map([
@@ -15,6 +23,9 @@ const API_ROUTES = new Map([
     { method: "POST", upstreamPath: "/search/cp-sat/ranked" },
   ],
 ]);
+for (const [path, route] of [...API_ROUTES]) {
+  API_ROUTES.set(path.replace(APPLICATION_PATH, LEGACY_APPLICATION_PATH), route);
+}
 
 const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
@@ -66,7 +77,7 @@ function notFound(request) {
 
 function isFingerprintedAsset(pathname) {
   return (
-    pathname.startsWith(ASSET_PATH_PREFIX) &&
+    PAGE_PATHS.some((path) => pathname.startsWith(`${path}/assets/`)) &&
     /\/[^/]+-[A-Za-z0-9_-]{8,}\.[^/]+$/.test(pathname)
   );
 }
@@ -226,11 +237,39 @@ export default {
       return proxyApiRequest(request, env, url, apiRoute);
     }
 
-    if (url.pathname === APPLICATION_PATH || url.pathname === CHECKER_PATH) {
+    const legacyPath = [...LEGACY_PAGES.keys()].find((path) =>
+      [path, `${path}/`, `${path}/index.html`].includes(url.pathname),
+    );
+    if (legacyPath && (url.searchParams.get("legacy") !== "1" || url.origin === CANONICAL_ORIGIN)) {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return methodNotAllowed(request, ["GET", "HEAD"]);
       }
-      url.pathname = `${url.pathname}/`;
+      return new Response(null, {
+        status: 301,
+        headers: withSecurityHeaders({
+          Location: `${CANONICAL_ORIGIN}${LEGACY_PAGES.get(legacyPath)}/${url.search}`,
+          // The export escape hatch depends on the query; do not cache across it.
+          "Cache-Control": "no-store",
+        }),
+      });
+    }
+
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return methodNotAllowed(request, ["GET", "HEAD"]);
+      }
+      return new Response(null, {
+        status: 301,
+        headers: withSecurityHeaders({ Location: `${url.origin}${APPLICATION_PATH}/${url.search}`, "Cache-Control": "no-store" }),
+      });
+    }
+
+    const pagePath = PAGE_PATHS.find((path) => url.pathname === path || url.pathname === `${path}/index.html`);
+    if (pagePath) {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return methodNotAllowed(request, ["GET", "HEAD"]);
+      }
+      url.pathname = `${pagePath}/`;
       return new Response(null, {
         status: 308,
         headers: withSecurityHeaders({
@@ -241,14 +280,12 @@ export default {
     }
 
     if (
-      url.pathname === APPLICATION_PATH_WITH_SLASH ||
-      url.pathname.startsWith(ASSET_PATH_PREFIX) ||
-      url.pathname === `${CHECKER_PATH}/` ||
-      url.pathname.startsWith(`${CHECKER_PATH}/assets/`) ||
-      url.pathname === `${APPLICATION_PATH_WITH_SLASH}release.json` ||
-      url.pathname === `${APPLICATION_PATH_WITH_SLASH}catalog/checker-catalog.json` ||
-      url.pathname === `${APPLICATION_PATH_WITH_SLASH}browser-solver/manifest.json` ||
-      new RegExp(`^${APPLICATION_PATH_WITH_SLASH}browser-solver/catalog-[a-f0-9]{64}\\.json$`).test(url.pathname)
+      PAGE_PATHS.some((path) => url.pathname === `${path}/` || url.pathname.startsWith(`${path}/assets/`)) ||
+      APPLICATION_PATHS.some((path) =>
+        [`${path}/release.json`, `${path}/catalog/checker-catalog.json`, `${path}/browser-solver/manifest.json`].includes(url.pathname) ||
+        new RegExp(`^${path}/browser-solver/catalog-[a-f0-9]{64}\\.json$`).test(url.pathname)
+      ) ||
+      ["/robots.txt", "/sitemap.xml", "/ads.txt"].includes(url.pathname)
     ) {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return methodNotAllowed(request, ["GET", "HEAD"]);

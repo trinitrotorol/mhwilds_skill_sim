@@ -8,9 +8,13 @@ from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
 
-ORIGIN = "https://trinitrotorol.com"
-SIM_PATH = "game-guide/mhwilds-skill-sim"
-CHECKER_PATH = "game-guide/mhwilds-inventory-checker"
+ROOT_ORIGIN = "https://trinitrotorol.com"
+ORIGIN = "https://mhwilds.trinitrotorol.com"
+SIM_PATH = "skill-sim"
+CHECKER_PATH = "inventory"
+LEGACY_SIM_PATH = "game-guide/mhwilds-skill-sim"
+LEGACY_CHECKER_PATH = "game-guide/mhwilds-inventory-checker"
+LEGACY_PATHS = {LEGACY_SIM_PATH: SIM_PATH, LEGACY_CHECKER_PATH: CHECKER_PATH}
 
 
 @dataclass(frozen=True)
@@ -84,11 +88,11 @@ PAGES = {
 }
 
 SITE_LINKS = (
-    ("/game-guide/", "ゲーム攻略・ツール一覧"),
-    ("/game-guide/mhwilds-guide/", "ワイルズツールの使い方"),
-    ("/about/", "運営者情報"),
-    ("/privacy/", "プライバシーポリシー"),
-    ("/contact/", "お問い合わせ"),
+    (f"{ROOT_ORIGIN}/game-guide/", "ゲーム攻略・ツール一覧"),
+    (f"{ROOT_ORIGIN}/game-guide/mhwilds-guide/", "ワイルズツールの使い方"),
+    (f"{ROOT_ORIGIN}/about/", "運営者情報"),
+    (f"{ROOT_ORIGIN}/privacy/", "プライバシーポリシー"),
+    (f"{ROOT_ORIGIN}/contact/", "お問い合わせ"),
 )
 
 
@@ -155,7 +159,9 @@ class _Document(HTMLParser):
 
 def enrich_html(source: str, app_path: str, stylesheet_url: str) -> str:
     """Add context only to a complete, previously unenriched application shell."""
-    page = PAGES[app_path]
+    canonical_path = LEGACY_PATHS.get(app_path, app_path)
+    legacy = app_path in LEGACY_PATHS
+    page = PAGES[canonical_path]
     if not stylesheet_url.startswith(f"/{app_path}/assets/") or any(
         character in stylesheet_url for character in '\\?#"<>\r\n'
     ):
@@ -171,7 +177,7 @@ def enrich_html(source: str, app_path: str, stylesheet_url: str) -> str:
         or document.title_start is not None
     ):
         raise ValueError("Expected one complete, unenriched application HTML document")
-    canonical = f"{ORIGIN}/{app_path}/"
+    canonical = f"{ORIGIN}/{canonical_path}/"
     metadata = "\n".join(
         [
             f"<title>{escape(page.title)}</title>",
@@ -186,11 +192,43 @@ def enrich_html(source: str, app_path: str, stylesheet_url: str) -> str:
             f'<link rel="stylesheet" href="{escape(stylesheet_url)}">',
         ]
     )
+    if legacy:
+        metadata += '\n<meta name="robots" content="noindex,follow">'
+    old_checker = f"{ROOT_ORIGIN}/{LEGACY_CHECKER_PATH}/?legacy=1"
+    if legacy:
+        migration = (
+            '<h2 id="service-migration-title">移転前の所持情報を取り出すページです</h2>'
+            "<p>ワイルズのツールは専用サイトへ移転しました。この旧サイトの保存データは残っています。"
+            "新サイトへは自動で引き継がれないため、"
+            f'<a href="{old_checker}">旧所持品チェッカー</a>でJSONをダウンロードし、'
+            f'<a href="{ORIGIN}/{CHECKER_PATH}/">新しい所持品チェッカー</a>の「JSONから復元」から'
+            "復元してください。取込内容を確認して統合または置換を選べます。</p>"
+            f'<p><a href="{canonical}">新しいサイトでこのツールを開く</a></p>'
+        )
+        related_legacy = next(
+            path
+            for path, current in LEGACY_PATHS.items()
+            if current == page.related_path
+        )
+        related_url = f"/{related_legacy}/?legacy=1"
+    else:
+        migration = (
+            '<h2 id="service-migration-title">以前のサイトで所持品を登録した方へ</h2>'
+            "<p>サイトの移転に伴い、以前の保存データは自動では引き継がれません。"
+            "以前と同じブラウザで"
+            f'<a href="{old_checker}">旧所持品チェッカーを開いてJSONをダウンロード</a>し、'
+            f'<a href="/{CHECKER_PATH}/">このサイトの所持品チェッカー</a>の「JSONから復元」から'
+            "復元してください。取込内容を確認して統合または置換を選べます。"
+            "旧サイトの保存データは削除されません。</p>"
+        )
+        related_url = f"/{page.related_path}/"
     navigation = (
         '\n<nav class="service-context-nav" aria-label="サイトナビゲーション">'
-        '<a href="/">trinitrotorol</a>'
-        '<a href="/game-guide/">ゲーム攻略・ツール</a>'
-        '<a href="/game-guide/mhwilds-guide/">使い方</a></nav>\n'
+        f'<a href="{ROOT_ORIGIN}/">trinitrotorol</a>'
+        f'<a href="{ROOT_ORIGIN}/game-guide/">ゲーム攻略・ツール</a>'
+        f'<a href="{ROOT_ORIGIN}/game-guide/mhwilds-guide/">使い方</a></nav>\n'
+        '<aside class="service-migration-notice" aria-labelledby="service-migration-title">'
+        f"{migration}</aside>\n"
         '<noscript><main class="service-script-notice" '
         'aria-labelledby="service-no-script-title">'
         f'<h1 id="service-no-script-title">{escape(page.title.partition("｜")[0])}</h1>'
@@ -198,7 +236,7 @@ def enrich_html(source: str, app_path: str, stylesheet_url: str) -> str:
         "検索や所持品の編集にはJavaScriptを有効にしてください。"
         "このページの説明と使い方の案内は、そのまま読むことができます。"
         '</p><p><a href="#service-overview">このツールの説明を読む</a></p>'
-        '<p><a href="/game-guide/mhwilds-guide/">詳しい使い方を読む</a></p>'
+        f'<p><a href="{ROOT_ORIGIN}/game-guide/mhwilds-guide/">詳しい使い方を読む</a></p>'
         "</main></noscript>\n"
     )
     steps = "".join(f"<li>{escape(step)}</li>" for step in page.steps)
@@ -214,8 +252,8 @@ def enrich_html(source: str, app_path: str, stylesheet_url: str) -> str:
         f"<h3>使い方の流れ</h3><ol>{steps}</ol>"
         f"<h3>利用前に確認すること</h3><p>{escape(page.limitation)}</p>"
         '<p class="service-related-links">'
-        '<a href="/game-guide/mhwilds-guide/">詳しい使い方と検索結果の見方</a>'
-        f'<a href="/{escape(page.related_path)}/">{escape(page.related_label)}</a></p>'
+        f'<a href="{ROOT_ORIGIN}/game-guide/mhwilds-guide/">詳しい使い方と検索結果の見方</a>'
+        f'<a href="{escape(related_url)}">{escape(page.related_label)}</a></p>'
         '<p class="service-independence">本サイトは個人が運営する非公式サイトです。'
         "ゲームの開発・販売元とは関係ありません。</p>"
         '<nav aria-label="サイト情報"><ul class="service-information-links">'
@@ -237,7 +275,7 @@ def enrich_html(source: str, app_path: str, stylesheet_url: str) -> str:
 def enrich_release_apps(output: Path) -> None:
     stylesheet = Path(__file__).with_name("service-html.css").read_bytes()
     stylesheet_name = f"service-info-{hashlib.sha256(stylesheet).hexdigest()[:16]}.css"
-    for app_path in PAGES:
+    for app_path in [*PAGES, *LEGACY_PATHS]:
         app = output / app_path
         index = app / "index.html"
         enriched = enrich_html(

@@ -53,7 +53,7 @@ class Page(HTMLParser):
 def test_each_app_has_unique_canonical_metadata_and_visible_useful_copy(app_path):
     html = script.enrich_html(SHELL, app_path, f"/{app_path}/assets/context.css")
     page = Page(html)
-    canonical = f"https://trinitrotorol.com/{app_path}/"
+    canonical = f"https://mhwilds.trinitrotorol.com/{app_path}/"
     assert page.attributes("link", rel="canonical") == [
         {"rel": "canonical", "href": canonical}
     ]
@@ -90,8 +90,34 @@ def test_each_app_has_unique_canonical_metadata_and_visible_useful_copy(app_path
     links = {attrs["href"] for attrs in page.attributes("a")}
     assert {url for url, _ in script.SITE_LINKS} <= links
     assert f"/{script.PAGES[app_path].related_path}/" in links
-    assert all(url.startswith(("/", "#")) and not url.startswith("//") for url in links)
+    assert all(
+        url.startswith(("/", "#", f"{script.ROOT_ORIGIN}/"))
+        and not url.startswith("//")
+        for url in links
+    )
     assert any("JavaScript" in value for _, value in page.text)
+    assert page.attributes("aside", **{"aria-labelledby": "service-migration-title"})
+    assert f"{script.ROOT_ORIGIN}/{script.LEGACY_CHECKER_PATH}/?legacy=1" in links
+    assert not page.attributes("meta", name="robots")
+
+
+@pytest.mark.parametrize("old_path,new_path", script.LEGACY_PATHS.items())
+def test_legacy_export_shell_retains_old_assets_but_points_canonical_to_new_site(
+    old_path, new_path
+):
+    html = script.enrich_html(SHELL, old_path, f"/{old_path}/assets/context.css")
+    page = Page(html)
+    assert page.attributes("link", rel="canonical")[0]["href"] == (
+        f"{script.ORIGIN}/{new_path}/"
+    )
+    assert page.attributes("meta", name="robots")[0]["content"] == "noindex,follow"
+    other_old_path = next(path for path in script.LEGACY_PATHS if path != old_path)
+    links = {attrs["href"] for attrs in page.attributes("a")}
+    assert f"/{other_old_path}/?legacy=1" in links
+    assert f"{script.ORIGIN}/{script.CHECKER_PATH}/" in links
+    assert page.attributes("link", href=f"/{old_path}/assets/context.css")
+    assert "保存データは残っています" in html
+    assert page.attributes("script") == Page(SHELL).attributes("script")
 
 
 def test_built_module_and_existing_assets_survive_without_relaxing_csp():

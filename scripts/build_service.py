@@ -19,7 +19,14 @@ from mhwilds_skill_sim.catalog.checker_export import (
 )
 from mhwilds_skill_sim.catalog.loader import load_catalog
 from scripts.merge_appraisal_rules import merge_files
-from scripts.service_html import CHECKER_PATH, SIM_PATH, enrich_release_apps
+from scripts.service_html import (
+    CHECKER_PATH,
+    LEGACY_CHECKER_PATH,
+    LEGACY_SIM_PATH,
+    ORIGIN,
+    SIM_PATH,
+    enrich_release_apps,
+)
 from scripts.sync_mhdb_catalog import sync_files
 from scripts.sync_appraisal_sheet import sync_files as sync_appraisal
 
@@ -131,14 +138,26 @@ def build_service(
         source_catalog_sha256=revision,
         include_generated_appraisal_charms=False,
     )
-    for path, args in [
-        (ROOT, ["--prefix", "apps/web", "run", "build"]),
-        (child, ["run", "build"]),
-    ]:
-        subprocess.run(["sh", str(path / "scripts/npmw"), *args], cwd=path, check=True)
     output = staging / "assets"
-    shutil.copytree(ROOT / "apps/web/dist" / SIM_PATH, output / SIM_PATH)
-    shutil.copytree(child / "dist", output / CHECKER_PATH)
+    app_pairs = [(LEGACY_SIM_PATH, LEGACY_CHECKER_PATH), (SIM_PATH, CHECKER_PATH)]
+    for sim_path, checker_path in app_pairs:
+        # Build each origin from source; never rewrite generated JavaScript.
+        for path, args, base in [
+            (ROOT, ["--prefix", "apps/web", "run", "build"], sim_path),
+            (child, ["run", "build"], checker_path),
+        ]:
+            subprocess.run(
+                ["sh", str(path / "scripts/npmw"), *args],
+                cwd=path,
+                check=True,
+                env={
+                    **os.environ,
+                    "VITE_BASE_PATH": f"/{base}/",
+                    "VITE_SIM_BASE_PATH": f"/{sim_path}/",
+                },
+            )
+        shutil.copytree(ROOT / "apps/web/dist" / sim_path, output / sim_path)
+        shutil.copytree(child / "dist", output / checker_path)
     enrich_release_apps(output)
     sim = output / SIM_PATH
     compact_bytes = write_json(sim / "browser-solver/catalog.json", compact)
@@ -156,6 +175,8 @@ def build_service(
         },
     )
     write_json(sim / "catalog/checker-catalog.json", checker)
+    for directory in ["browser-solver", "catalog"]:
+        shutil.copytree(sim / directory, output / LEGACY_SIM_PATH / directory)
     if git_sha(ROOT) != parent_sha or git_sha(child) != checker_sha:
         raise ValueError(
             "Source commits changed during the build; rebuild from stable sources"
@@ -191,6 +212,23 @@ def build_service(
         },
     }
     write_json(sim / "release.json", manifest)
+    write_json(output / LEGACY_SIM_PATH / "release.json", manifest)
+    (output / "robots.txt").write_text(
+        f"User-agent: *\nAllow: /\nSitemap: {ORIGIN}/sitemap.xml\n", encoding="utf-8"
+    )
+    (output / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + "".join(
+            f"<url><loc>{ORIGIN}/{path}/</loc></url>"
+            for path in [SIM_PATH, CHECKER_PATH]
+        )
+        + "</urlset>\n",
+        encoding="utf-8",
+    )
+    (output / "ads.txt").write_text(
+        "google.com, pub-6343181736493400, DIRECT, f08c47fec0942fa0\n", encoding="utf-8"
+    )
     headers = (
         "/*\n"
         "  X-Content-Type-Options: nosniff\n"
@@ -199,15 +237,18 @@ def build_service(
         "style-src 'self'; img-src 'self' data:; connect-src 'self'; "
         "worker-src 'self'; object-src 'none'; base-uri 'none'; "
         "frame-ancestors 'none'; form-action 'self'\n"
-        f"/{SIM_PATH}/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n"
-        f"/{CHECKER_PATH}/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n"
-        f"/{SIM_PATH}/browser-solver/catalog-*\n  Cache-Control: public, max-age=31536000, immutable\n"
-        f"/{SIM_PATH}/catalog/*\n  Cache-Control: no-cache\n"
-        f"/{SIM_PATH}/browser-solver/manifest.json\n  Cache-Control: no-cache\n"
-        f"/{SIM_PATH}/release.json\n  Cache-Control: no-cache\n"
-        f"/{SIM_PATH}/\n  Cache-Control: no-cache\n"
-        f"/{CHECKER_PATH}/\n  Cache-Control: no-cache\n"
     )
+    for sim_path, checker_path in app_pairs:
+        headers += (
+            f"/{sim_path}/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n"
+            f"/{checker_path}/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n"
+            f"/{sim_path}/browser-solver/catalog-*\n  Cache-Control: public, max-age=31536000, immutable\n"
+            f"/{sim_path}/catalog/*\n  Cache-Control: no-cache\n"
+            f"/{sim_path}/browser-solver/manifest.json\n  Cache-Control: no-cache\n"
+            f"/{sim_path}/release.json\n  Cache-Control: no-cache\n"
+            f"/{sim_path}/\n  Cache-Control: no-cache\n"
+            f"/{checker_path}/\n  Cache-Control: no-cache\n"
+        )
     (output / "_headers").write_text(headers, encoding="utf-8")
     published = ROOT / ".build/service-assets"
     if published.exists():
