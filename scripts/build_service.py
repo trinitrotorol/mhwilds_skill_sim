@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from scripts.service_html import (
 )
 from scripts.sync_mhdb_catalog import sync_files
 from scripts.sync_appraisal_sheet import sync_files as sync_appraisal
+from scripts.service_localization import build_english_names
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -71,6 +73,7 @@ def build_service(
     *,
     fixture: bool = False,
     appraisal_rules: Path | None = None,
+    english_source: Path | None = None,
     generated_at: str | None = None,
     require_clean: bool = False,
 ) -> dict[str, object]:
@@ -86,6 +89,14 @@ def build_service(
     source_dirty = {"parent": git_dirty(ROOT), "checker": git_dirty(child)}
     if require_clean and any(source_dirty.values()):
         raise ValueError("Production builds require clean parent and checker sources")
+    if source is not None and not fixture and english_source is None:
+        raise ValueError("Snapshot builds require a matching --english-source catalog")
+    if (
+        english_source is not None
+        and "fixtures" in english_source.parts
+        and not fixture
+    ):
+        raise ValueError("Synthetic English catalogs require explicit --fixture")
     staging = ROOT / ".build/service-staging" / stamp.replace(":", "-")
     staging.mkdir(parents=True, exist_ok=False)
     source_path = staging / "catalog.json"
@@ -122,6 +133,50 @@ def build_service(
     if not catalog.skills or not catalog.equipment or not catalog.decorations:
         raise ValueError("Refusing an empty production catalog")
     revision = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if source is None:
+        english_source = staging / "catalog-en.json"
+        sync_files(
+            raw_directory=staging / "raw-en",
+            catalog_output_path=english_source,
+            locale="en",
+        )
+        japanese_version = json.loads((staging / "raw/metadata.json").read_text())[
+            "version"
+        ]
+        english_version = json.loads((staging / "raw-en/metadata.json").read_text())[
+            "version"
+        ]
+        if japanese_version != english_version:
+            raise ValueError("Japanese and English source versions changed during sync")
+    elif english_source is not None:
+        english_snapshot = staging / "catalog-en.json"
+        shutil.copyfile(english_source, english_snapshot)
+        english_source = english_snapshot
+    english_path = english_source or source_path
+    english_catalog = load_catalog(path=english_path)
+    if fixture:
+        # Tiny CI catalogs intentionally omit display names. Keep their IDs as
+        # fixture labels without weakening production translation coverage.
+        english_catalog = replace(
+            english_catalog,
+            **{
+                collection: tuple(
+                    replace(
+                        item,
+                        display_name=item.display_name or getattr(item, identity),
+                    )
+                    for item in getattr(english_catalog, collection)
+                )
+                for collection, identity in (
+                    ("skills", "skill_id"),
+                    ("equipment", "equipment_id"),
+                    ("decorations", "decoration_id"),
+                )
+            },
+        )
+    english_names = build_english_names(
+        catalog=catalog, english_catalog=english_catalog
+    )
     checker = build_checker_catalog(
         catalog=catalog, revision=revision, generated_at=stamp
     )
@@ -175,7 +230,8 @@ def build_service(
         },
     )
     write_json(sim / "catalog/checker-catalog.json", checker)
-    for directory in ["browser-solver", "catalog"]:
+    english_bytes = write_json(sim / "locales/en.json", english_names)
+    for directory in ["browser-solver", "catalog", "locales"]:
         shutil.copytree(sim / directory, output / LEGACY_SIM_PATH / directory)
     if git_sha(ROOT) != parent_sha or git_sha(child) != checker_sha:
         raise ValueError(
@@ -199,6 +255,16 @@ def build_service(
         "appraisal_rules_available": bool(catalog.appraisal_charm_patterns),
         "features": build_catalog_metadata_response(catalog=catalog)["features"],
         "source": "https://wilds.mhdb.io",
+        "localization": {
+            "locales": ["ja", "en"],
+            "english_source_sha256": hashlib.sha256(
+                english_path.read_bytes()
+            ).hexdigest(),
+            "english_names_sha256": hashlib.sha256(english_bytes).hexdigest(),
+            "counts": {
+                group: len(entries) for group, entries in english_names["names"].items()
+            },
+        },
         "appraisal_source": appraisal_provenance,
         "source_files": [
             {"file": p.name, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
@@ -244,6 +310,7 @@ def build_service(
             f"/{checker_path}/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n"
             f"/{sim_path}/browser-solver/catalog-*\n  Cache-Control: public, max-age=31536000, immutable\n"
             f"/{sim_path}/catalog/*\n  Cache-Control: no-cache\n"
+            f"/{sim_path}/locales/*\n  Cache-Control: no-cache\n"
             f"/{sim_path}/browser-solver/manifest.json\n  Cache-Control: no-cache\n"
             f"/{sim_path}/release.json\n  Cache-Control: no-cache\n"
             f"/{sim_path}/\n  Cache-Control: no-cache\n"
@@ -272,6 +339,7 @@ def main() -> None:
     parser.add_argument("--source", type=Path)
     parser.add_argument("--fixture", action="store_true")
     parser.add_argument("--appraisal-rules", type=Path)
+    parser.add_argument("--english-source", type=Path)
     parser.add_argument("--require-clean", action="store_true")
     parser.add_argument(
         "--generated-at", default=os.environ.get("SERVICE_GENERATED_AT")
@@ -283,6 +351,7 @@ def main() -> None:
                 args.source,
                 fixture=args.fixture,
                 appraisal_rules=args.appraisal_rules,
+                english_source=args.english_source,
                 generated_at=args.generated_at,
                 require_clean=args.require_clean,
             )

@@ -49,9 +49,10 @@ timestamp and enabled features. Never deploy an artifact marked `fixture: true`.
 Inventory is origin-scoped browser storage. The build therefore keeps both old
 applications, their catalogs, and their assets available. Opening an old page
 with `?legacy=1` serves its original-origin app with `noindex` and a canonical
-link to the new site. Old app navigation retains this query. Both origins show
-instructions to download JSON from the old checker and import it on the new
-checker using its existing merge/replace confirmation. There is no automatic
+link to the new site. Old app navigation retains this query. The legacy pages
+and usage guide explain how to download JSON and import it on the new checker
+using its existing merge/replace confirmation. New app pages omit the migration
+banner. There is no automatic
 transfer, server storage, or deletion of saved data. Keep this export path after
 the move; redirects must never prevent users from recovering their local data.
 
@@ -62,6 +63,20 @@ Catalog bytes and release provenance are identical for both origins. Never
 rewrite generated JavaScript bundles to change origins or paths. Root-domain
 guides, privacy and contact links are absolute; no ads or analytics scripts are
 added by this migration.
+
+Both applications offer Japanese and English without reloading the form. The
+shared origin-local preference `mhwilds.ui.locale.v1` stores only `ja` or `en`;
+inventory IDs and stored labels are never translated or rewritten. English game
+names are fetched at build time from the same MHDB source and exported as
+`/skill-sim/locales/en.json` (also under the legacy simulator base). Every released
+skill, item and decoration must have a matching English stable ID. This separate
+display-only file does not alter the solver catalog or its revision.
+
+Live builds sync both languages and require matching upstream versions. To build
+from saved catalogs, provide `--source <ja-catalog.json> --english-source
+<en-catalog.json>` along with the matching appraisal rules. Synthetic fixture
+builds may reuse fixture display names and must never be published. The release
+manifest records English source/output hashes and coverage counts.
 
 The zone Configuration Rule `MHWILDS apps: disable RUM` excludes the entire
 `mhwilds.trinitrotorol.com` hostname as well as both legacy tool paths on

@@ -126,6 +126,7 @@ def test_both_origins_build_from_same_pinned_sources_and_catalog(tmp_path, monke
         "release.json",
         "catalog/checker-catalog.json",
         "browser-solver/manifest.json",
+        "locales/en.json",
     ]:
         assert (output / script.SIM_PATH / path).read_bytes() == (
             output / script.LEGACY_SIM_PATH / path
@@ -144,6 +145,96 @@ def test_both_origins_build_from_same_pinned_sources_and_catalog(tmp_path, monke
     sitemap = (output / "sitemap.xml").read_text()
     assert "game-guide" not in sitemap
     assert sitemap.count("<loc>") == 2
+    translations = json.loads(
+        (output / script.SIM_PATH / "locales/en.json").read_text()
+    )
+    assert translations["schema_version"] == 1
+    assert translations["locale"] == "en"
+    assert translations["names"]["skills"]
+
+
+def test_production_snapshot_requires_matching_english_source(tmp_path, monkeypatch):
+    workspace, source = prepare_release(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="english-source"):
+        script.build_service(source, generated_at="2026-10-06T00:00:00Z")
+    assert not (workspace / ".build").exists()
+
+
+def test_real_tiny_fixture_uses_ids_for_missing_translation_names(
+    tmp_path, monkeypatch
+):
+    workspace, _ = prepare_release(tmp_path, monkeypatch)
+    source = FIXTURES / "tiny_catalog.json"
+    original = source.read_bytes()
+    result = script.build_service(
+        source, fixture=True, generated_at="2026-10-06T00:00:00Z"
+    )
+    output = workspace / ".build/service-assets"
+    names = json.loads((output / script.SIM_PATH / "locales/en.json").read_text())[
+        "names"
+    ]
+    catalog = script.load_catalog(path=source)
+    for collection, identity in (
+        ("skills", "skill_id"),
+        ("equipment", "equipment_id"),
+        ("decorations", "decoration_id"),
+    ):
+        assert names[collection] == {
+            getattr(item, identity): item.display_name or getattr(item, identity)
+            for item in getattr(catalog, collection)
+        }
+    assert result["fixture"] is True
+    assert result["catalog_revision"] == hashlib.sha256(original).hexdigest()
+    assert source.read_bytes() == original
+
+
+def test_production_still_rejects_missing_english_names(tmp_path, monkeypatch):
+    workspace, source = prepare_release(tmp_path, monkeypatch)
+    # Use a normal snapshot path so the production check reaches name coverage.
+    source.write_bytes((FIXTURES / "tiny_catalog.json").read_bytes())
+    with pytest.raises(ValueError, match="English skills names missing"):
+        script.build_service(
+            source, english_source=source, generated_at="2026-10-06T00:00:00Z"
+        )
+    assert not (workspace / ".build/service-assets").exists()
+    assert not (workspace / ".build/service-current.json").exists()
+
+
+def test_english_fixture_requires_explicit_fixture_flag(tmp_path, monkeypatch):
+    workspace, source = prepare_release(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="Synthetic English catalogs"):
+        script.build_service(
+            source,
+            english_source=FIXTURES / "tiny_catalog.json",
+            generated_at="2026-10-06T00:00:00Z",
+        )
+    assert not (workspace / ".build").exists()
+
+
+def test_english_snapshot_hash_matches_used_bytes_even_when_input_changes(
+    tmp_path, monkeypatch
+):
+    workspace, source = prepare_release(tmp_path, monkeypatch)
+    english = tmp_path / "english.json"
+    original = source.read_bytes()
+    english.write_bytes(original)
+    monkeypatch.setattr(
+        script.subprocess,
+        "run",
+        lambda *args, **kwargs: english.write_bytes(b"replaced after loading"),
+    )
+    result = script.build_service(
+        source,
+        fixture=True,
+        english_source=english,
+        generated_at="2026-10-06T00:00:00Z",
+    )
+    assert (
+        result["localization"]["english_source_sha256"]
+        == hashlib.sha256(original).hexdigest()
+    )
+    staged = next((workspace / ".build/service-staging").glob("*/catalog-en.json"))
+    assert staged.read_bytes() == original
 
 
 def test_failed_application_build_keeps_previous_assets_and_release_pointer(

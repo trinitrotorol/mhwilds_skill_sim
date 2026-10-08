@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { profileWarnings } from "../../../../subprojects/inventory-checker/src/domain";
 import { createInventoryStore } from "../../../../subprojects/inventory-checker/src/storage";
 import { fetchServiceCatalog, type InventoryAcknowledgment } from "./search";
+import { useLocale } from "../i18n";
 
 export function InventoryNotice({ onStateChange }: { onStateChange?: (state: InventoryAcknowledgment | null) => void }) {
+  const { t } = useLocale();
   const [messages, setMessages] = useState<string[]>(["所持品を確認しています…"]);
   useEffect(() => {
     const store = createInventoryStore();
@@ -38,5 +40,5 @@ export function InventoryNotice({ onStateChange }: { onStateChange?: (state: Inv
     const unsubscribe = store.subscribe(() => { void update(); });
     return () => { controller.abort(); unsubscribe(); store.dispose(); };
   }, [onStateChange]);
-  return <ul aria-label="所持品の状態">{messages.map((message) => <li key={message}>{message}</li>)}</ul>;
+  return <ul aria-label={t("所持品の状態")}>{messages.map((message) => <li key={message}>{t(message)}</li>)}</ul>;
 }

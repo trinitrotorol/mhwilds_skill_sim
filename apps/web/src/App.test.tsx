@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchCatalogMetadata, searchRankedBuilds } from "./service/search";
 import App from "./App";
+import { LOCALE_EVENT, LOCALE_KEY } from "./i18n";
 import type {
   CatalogMetadataResponse,
   EquipmentResponse,
@@ -156,6 +157,7 @@ async function renderReady() {
 }
 
 beforeEach(() => {
+  localStorage.removeItem(LOCALE_KEY);
   fetchCatalogMetadataMock.mockReset();
   searchRankedBuildsMock.mockReset();
   fetchCatalogMetadataMock.mockResolvedValue(METADATA);
@@ -583,5 +585,107 @@ describe("search states and results", () => {
     expect(screen.getByRole("button", { name: "検索中…" })).toBeDisabled();
     await act(async () => second.resolve(EMPTY_EXHAUSTED));
     expect(await screen.findByText("条件を満たす装備構成が見つかりませんでした。")).toBeInTheDocument();
+  });
+});
+
+afterEach(() => {
+  localStorage.removeItem(LOCALE_KEY);
+  vi.unstubAllGlobals();
+});
+
+describe("language selection", () => {
+  const names = {
+    schema_version: 1, locale: "en",
+    names: {
+      skills: { skill_attack: "Attack Boost", skill_critical_eye: "Critical Eye", fallback_skill: "Group Power" },
+      equipment: { "chest-id": "Hunter Mail", "arms-id": "Hunter Vambraces" },
+      decorations: { deco_known: "Expert Jewel" },
+    },
+  };
+  function mockNames() {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(names), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetcher);
+    return fetcher;
+  }
+
+  it("switches result names and form labels without changing selections, request IDs or results", async () => {
+    const fetcher = mockNames();
+    const response = { candidates: [{ ...FIRST_CANDIDATE, equipment: FIRST_CANDIDATE.equipment.map((item) => item.part === "chest" ? { ...item, series_skill_ids: ["fallback_skill"] } : item) }], exhausted: true, timed_out: false };
+    const originalResponse = JSON.stringify(response);
+    searchRankedBuildsMock.mockResolvedValue(response);
+    const user = await renderReady();
+    expect(fetcher).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "必須スキルを追加" }));
+    await user.selectOptions(screen.getByLabelText("必須スキル 1 のスキル"), "skill_attack");
+    fireEvent.change(screen.getByLabelText("必須スキル 1 の最低レベル"), { target: { value: "3" } });
+    await user.selectOptions(screen.getByLabelText("武器種"), "long-sword");
+    await user.click(screen.getByRole("button", { name: "検索する" }));
+    await screen.findByRole("heading", { name: "候補 1" });
+    const localeEvents = vi.fn();
+    window.addEventListener(LOCALE_EVENT, localeEvents);
+    try {
+      await user.selectOptions(screen.getByLabelText("言語 / Language"), "en");
+      expect(await screen.findByText("Expert Jewel")).toBeInTheDocument();
+      expect(document.documentElement.lang).toBe("en");
+      expect(localStorage.getItem(LOCALE_KEY)).toBe("en");
+      expect(localeEvents).toHaveBeenLastCalledWith(expect.objectContaining({ detail: "en" }));
+      expect(screen.getByRole("heading", { name: "Candidate 1" })).toBeInTheDocument();
+      expect(screen.getAllByText("Hunter Mail", { exact: false }).length).toBeGreaterThan(0);
+      expect(screen.getByText("Series: Group Power")).toBeInTheDocument();
+      expect(screen.getByText("Critical Eye")).toBeInTheDocument();
+      expect(screen.getByText("鉄の武器")).toBeInTheDocument(); // Unknown names stay original.
+      expect(screen.getByLabelText("Required skills 1: Skills")).toHaveValue("skill_attack");
+      expect(screen.getByLabelText("Required skills 1: Minimum level")).toHaveValue(3);
+      expect(screen.getByLabelText("Weapon type")).toHaveValue("long-sword");
+      expect(screen.getByRole("option", { name: "Attack Boost (Weapon)" })).toHaveValue("skill_attack");
+      expect(searchRankedBuildsMock).toHaveBeenCalledOnce();
+      expect(searchRankedBuildsMock.mock.calls[0]?.[0]).toMatchObject({ requirements: [{ skill_id: "skill_attack", min_level: 3 }], weapon_kind: "long-sword" });
+      expect(fetchCatalogMetadataMock).toHaveBeenCalledOnce();
+      const request = fetcher.mock.calls[0]!;
+      expect(new URL(request[0] as string).origin).toBe(location.origin);
+      expect(new URL(request[0] as string).pathname).toBe(`${import.meta.env.BASE_URL}locales/en.json`);
+      expect(request[1]).toMatchObject({ credentials: "omit", redirect: "error" });
+      await user.selectOptions(screen.getByLabelText("言語 / Language"), "ja");
+      expect(screen.getByRole("heading", { name: "候補 1" })).toBeInTheDocument();
+      expect(screen.getByText("達人珠")).toBeInTheDocument();
+      expect(screen.getByLabelText("必須スキル 1 の最低レベル")).toHaveValue(3);
+      expect(JSON.stringify(response)).toBe(originalResponse);
+      expect(document.documentElement.lang).toBe("ja");
+    } finally { window.removeEventListener(LOCALE_EVENT, localeEvents); }
+  });
+
+  it("translates in-flight progress and the eventual error without restarting or cancelling search", async () => {
+    mockNames();
+    const pending = deferred<RankedSearchResponse>();
+    searchRankedBuildsMock.mockReturnValue(pending.promise);
+    const user = await renderReady();
+    await user.click(screen.getByRole("button", { name: "検索する" }));
+    const options = searchRankedBuildsMock.mock.calls[0]?.[1];
+    act(() => {
+      options?.onEngine?.("browser");
+      options?.onProgress?.({ elapsed_ms: 4000, visited_nodes: 123, pruned_nodes: 0, complete_equipment_selections: 0, preference_score: null, decoration_count: null });
+    });
+    await user.selectOptions(screen.getByLabelText("言語 / Language"), "en");
+    expect(screen.getByRole("status")).toHaveTextContent("Browser calculation · 4s · 123 nodes explored");
+    expect(screen.getByRole("button", { name: "Searching…" })).toBeDisabled();
+    expect(options?.signal?.aborted).toBe(false);
+    expect(searchRankedBuildsMock).toHaveBeenCalledOnce();
+    await act(async () => pending.reject(new Error("検索結果の形式が不正です。")));
+    expect(screen.getByRole("alert")).toHaveTextContent("The search result format is invalid.");
+    await user.selectOptions(screen.getByLabelText("言語 / Language"), "ja");
+    expect(screen.getByRole("alert")).toHaveTextContent("検索結果の形式が不正です。");
+  });
+
+  it("uses the saved language and retains original catalog names when the sidecar is unavailable", async () => {
+    localStorage.setItem(LOCALE_KEY, "en");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Find an equipment build" });
+    await user.click(screen.getByRole("button", { name: "Add required skill" }));
+    expect(screen.getByRole("option", { name: "攻撃 (Weapon)" })).toHaveValue("skill_attack");
+    expect(screen.getByLabelText("言語 / Language")).toHaveValue("en");
+    fireEvent.change(screen.getByLabelText("Maximum results"), { target: { value: "25" } });
+    expect(screen.getByText("Enter a whole number from 1 to 20.")).toBeInTheDocument();
   });
 });

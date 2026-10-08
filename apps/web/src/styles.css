@@ -17,6 +17,7 @@ a:visited { color: #6500a8; }
 .header-content { padding-block: 32px; }
 .header-content nav { margin-top: 16px; }
 .header-content nav a { display: inline-flex; align-items: center; min-height: 44px; }
+.language-control { width: min(100%, 220px); margin-top: 20px; }
 .eyebrow, .section-kicker, .state-label { margin: 0 0 8px; color: var(--muted); font-size: .875rem; font-weight: 700; letter-spacing: .04em; }
 h1, h2, h3, h4, p { overflow-wrap: anywhere; }
 h1, h2, h3, h4 { color: var(--text); line-height: 1.5; font-weight: 700; }
@@ -82,6 +83,7 @@ button:disabled, .secondary-button:disabled { color: #666; background: #eee; bor
 .detail-list li span:nth-child(2) { margin-left: auto; color: var(--muted); font-size: .875rem; }
 .detail-list strong, .skill-level-list strong { color: var(--text); font-variant-numeric: tabular-nums; }
 .result-value { min-width: 0; overflow-wrap: anywhere; }
+.equipment-bonus { display: block; margin-top: 4px; color: var(--muted); }
 .empty-note { margin: 0; color: var(--muted); font-size: 1rem; }
 @media (max-width: 760px) { .header-content, .main-content { width: calc(100% - 32px); } .header-content { padding-block: 24px; } .main-content { padding-block: 24px 48px; } .top-fields, .skill-row, .equipment-list { grid-template-columns: minmax(0, 1fr); } .form-section { padding: 16px; } .remove-button, .add-button, .submit-button { width: 100%; } .submit-row > button { flex: 1 1 auto; } .candidate-heading { display: block; } .candidate-heading p { margin-top: 8px; } .detail-list li, .skill-level-list li { align-items: flex-start; flex-direction: column; } .detail-list li span:nth-child(2) { margin-left: 0; } }
 @media (forced-colors: active) { .site-header, .primary-button, .search-status, .catalog-counts { border: 1px solid CanvasText; } :focus-visible { outline-color: Highlight; } }

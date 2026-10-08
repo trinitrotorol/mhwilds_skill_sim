@@ -12,6 +12,8 @@ import {
 import { fetchCatalogMetadata, searchRankedBuilds, type Engine, type InventoryAcknowledgment } from "./service/search";
 import { InventoryNotice } from "./service/InventoryNotice";
 import { inventoryHref } from "./lib/paths";
+import { LocaleProvider } from "./LocaleProvider";
+import { useLocale } from "./i18n";
 import type {
   CatalogMetadataResponse,
   RankedSearchRequestPayload,
@@ -125,6 +127,7 @@ function SkillSection({
   sectionId,
   skills,
 }: SkillSectionProps) {
+  const { locale, t, name } = useLocale();
   const selectedSkillIds = new Set(
     rows.map((row) => row.skillId).filter((skillId) => skillId !== ""),
   );
@@ -136,7 +139,7 @@ function SkillSection({
       <p className="section-description">{description}</p>
 
       {skills.length === 0 && (
-        <p className="empty-note">選択できるスキルがありません。</p>
+        <p className="empty-note">{t("選択できるスキルがありません。")}</p>
       )}
 
       <div className="skill-rows">
@@ -153,17 +156,17 @@ function SkillSection({
           return (
             <div className="skill-row" key={row.key}>
               <div className="field skill-field">
-                <label htmlFor={skillInputId}>スキル</label>
+                <label htmlFor={skillInputId}>{t("スキル")}</label>
                 <select
                   aria-invalid={row.skillId === ""}
-                  aria-label={`${heading} ${index + 1} のスキル`}
+                  aria-label={t(`${heading} ${index + 1} のスキル`)}
                   id={skillInputId}
                   onChange={(event) =>
                     onSkillChange(row.key, event.currentTarget.value)
                   }
                   value={row.skillId}
                 >
-                  <option value="">スキルを選択</option>
+                  <option value="">{t("スキルを選択")}</option>
                   {skills.map((option) => (
                     <option
                       disabled={
@@ -173,8 +176,8 @@ function SkillSection({
                       key={option.skill_id}
                       value={option.skill_id}
                     >
-                      {displaySkillName(option)}（
-                      {SKILL_KIND_LABELS[option.kind]}）
+                      {name("skills", option.skill_id, option.display_name)}{locale === "ja" ? "（" : " ("}
+                      {t(SKILL_KIND_LABELS[option.kind])}{locale === "ja" ? "）" : ")"}
                     </option>
                   ))}
                 </select>
@@ -185,7 +188,7 @@ function SkillSection({
                 <input
                   aria-describedby={!levelIsValid ? levelErrorId : undefined}
                   aria-invalid={!levelIsValid}
-                  aria-label={`${heading} ${index + 1} の${levelLabel}`}
+                  aria-label={t(`${heading} ${index + 1} の${levelLabel}`)}
                   disabled={!skill}
                   id={levelInputId}
                   inputMode="numeric"
@@ -200,7 +203,7 @@ function SkillSection({
                 />
                 {!levelIsValid && skill && (
                   <span className="field-error" id={levelErrorId}>
-                    1から{maxLevel}の整数を入力してください。
+                    {t(`1から${maxLevel}の整数を入力してください。`)}
                   </span>
                 )}
               </div>
@@ -253,37 +256,38 @@ interface CandidateListProps {
 }
 
 function CandidateList({ metadata, response }: CandidateListProps) {
+  const { t, name } = useLocale();
   const decorationNames = new Map(
     metadata.decorations.map((decoration) => [
       decoration.decoration_id,
-      decoration.display_name ?? decoration.decoration_id,
+      name("decorations", decoration.decoration_id, decoration.display_name),
     ]),
   );
   const skillNames = new Map(
     metadata.skills.map((skill) => [
       skill.skill_id,
-      skill.display_name ?? skill.skill_id,
+      name("skills", skill.skill_id, skill.display_name),
     ]),
   );
 
   return (
     <section aria-labelledby="results-heading" className="results-section">
       <div aria-live="polite" className="search-status" role="status">
-        {searchStatusMessage(response)}
+        {t(searchStatusMessage(response))}
       </div>
 
-      <h2 id="results-heading">検索結果</h2>
+      <h2 id="results-heading">{t("検索結果")}</h2>
 
       <div className="candidate-list">
         {response.candidates.map((candidate, candidateIndex) => (
           <article className="candidate-card" key={`candidate-${candidateIndex}`}>
             <div className="candidate-heading">
-              <h3>候補 {candidateIndex + 1}</h3>
-              <p>優先スコア: {candidate.preference_score}</p>
+              <h3>{t("候補")} {candidateIndex + 1}</h3>
+              <p>{t("優先スコア:")} {candidate.preference_score}</p>
             </div>
 
             <section aria-labelledby={`equipment-${candidateIndex}`}>
-              <h4 id={`equipment-${candidateIndex}`}>装備</h4>
+              <h4 id={`equipment-${candidateIndex}`}>{t("装備")}</h4>
               <ul className="equipment-list">
                 {PARTS.map(([part, partLabel]) => {
                   const equipment = candidate.equipment.find(
@@ -291,11 +295,19 @@ function CandidateList({ metadata, response }: CandidateListProps) {
                   );
                   return (
                     <li className="equipment-row" key={part}>
-                      <span className="part-label">{partLabel}</span>
+                      <span className="part-label">{t(partLabel)}</span>
                       <span className="result-value">
                         {equipment
-                          ? equipment.display_name ?? equipment.equipment_id
-                          : "該当装備なし"}
+                          ? name("equipment", equipment.equipment_id, equipment.display_name)
+                          : t("該当装備なし")}
+                        {equipment && ([
+                          ["シリーズ", equipment.series_skill_ids],
+                          ["グループ", equipment.group_skill_ids],
+                        ] as const).map(([label, ids]) => ids.length > 0 && (
+                          <small className="equipment-bonus" key={label}>
+                            {t(label)}: {ids.map((id) => skillNames.get(id) ?? id).join(", ")}
+                          </small>
+                        ))}
                       </span>
                     </li>
                   );
@@ -304,9 +316,9 @@ function CandidateList({ metadata, response }: CandidateListProps) {
             </section>
 
             <section aria-labelledby={`decorations-${candidateIndex}`}>
-              <h4 id={`decorations-${candidateIndex}`}>装飾品</h4>
+              <h4 id={`decorations-${candidateIndex}`}>{t("装飾品")}</h4>
               {candidate.placements.length === 0 ? (
-                <p className="empty-note">装飾品なし</p>
+                <p className="empty-note">{t("装飾品なし")}</p>
               ) : (
                 <ul className="detail-list">
                   {candidate.placements.map((placement, placementIndex) => {
@@ -314,7 +326,7 @@ function CandidateList({ metadata, response }: CandidateListProps) {
                       (item) => item.equipment_id === placement.equipment_id,
                     );
                     const equipmentName = equipment
-                      ? equipment.display_name ?? equipment.equipment_id
+                      ? name("equipment", equipment.equipment_id, equipment.display_name)
                       : placement.equipment_id;
                     const decorationName =
                       decorationNames.get(placement.decoration_id) ??
@@ -322,7 +334,7 @@ function CandidateList({ metadata, response }: CandidateListProps) {
                     return (
                       <li key={`placement-${placementIndex}`}>
                         <span className="result-value">{equipmentName}</span>
-                        <span>スロット {placement.slot_index + 1}</span>
+                        <span>{t("スロット")} {placement.slot_index + 1}</span>
                         <strong className="result-value">{decorationName}</strong>
                       </li>
                     );
@@ -332,9 +344,9 @@ function CandidateList({ metadata, response }: CandidateListProps) {
             </section>
 
             <section aria-labelledby={`skills-${candidateIndex}`}>
-              <h4 id={`skills-${candidateIndex}`}>発動スキル</h4>
+              <h4 id={`skills-${candidateIndex}`}>{t("発動スキル")}</h4>
               {candidate.skill_levels.length === 0 ? (
-                <p className="empty-note">発動スキルなし</p>
+                <p className="empty-note">{t("発動スキルなし")}</p>
               ) : (
                 <ul className="skill-level-list">
                   {candidate.skill_levels.map((skillLevel, skillIndex) => (
@@ -356,7 +368,8 @@ function CandidateList({ metadata, response }: CandidateListProps) {
   );
 }
 
-export default function App() {
+function Simulator() {
+  const { locale, setLocale, t, name } = useLocale();
   const [metadataStatus, setMetadataStatus] =
     useState<MetadataStatus>("loading");
   const [metadata, setMetadata] = useState<CatalogMetadataResponse | null>(null);
@@ -444,9 +457,9 @@ export default function App() {
     return metadata.skills
       .map((skill, index) => ({ index, skill }))
       .sort((left, right) => {
-        const nameComparison = displaySkillName(left.skill).localeCompare(
-          displaySkillName(right.skill),
-          "ja",
+        const nameComparison = name("skills", left.skill.skill_id, displaySkillName(left.skill)).localeCompare(
+          name("skills", right.skill.skill_id, displaySkillName(right.skill)),
+          locale,
         );
         if (nameComparison !== 0) {
           return nameComparison;
@@ -454,7 +467,7 @@ export default function App() {
         return left.index - right.index;
       })
       .map(({ skill }) => skill);
-  }, [metadata]);
+  }, [metadata, locale, name]);
 
   const skillById = useMemo(
     () => new Map(sortedSkills.map((skill) => [skill.skill_id, skill])),
@@ -612,22 +625,27 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#main-content">本文へ移動</a>
+      <a className="skip-link" href="#main-content">{t("本文へ移動")}</a>
       <header className="site-header">
         <div className="header-content">
-          <p className="eyebrow">装備構成検索</p>
-          <h1>MHWILDS スキルシミュレータ</h1>
-          <nav aria-label="サービス"><a href={inventoryHref(import.meta.env.BASE_URL, window.location.search)}>所持品チェッカーへ</a></nav>
+          <p className="eyebrow">{t("装備構成検索")}</p>
+          <h1>{t("MHWILDS スキルシミュレータ")}</h1>
+          <div className="field language-control">
+            <label htmlFor="ui-locale">言語 / Language</label>
+            <select id="ui-locale" value={locale} onChange={(event) => setLocale(event.currentTarget.value === "en" ? "en" : "ja")}>
+              <option value="ja" lang="ja">日本語</option>
+              <option value="en" lang="en">English</option>
+            </select>
+          </div>
+          <nav aria-label={t("サービス")}><a href={inventoryHref(import.meta.env.BASE_URL, window.location.search)}>{t("所持品チェッカーへ")}</a></nav>
           <ul className="lead">
-            <li>必須スキルはすべて満たす</li>
-            <li>
-              優先スキルは必須条件を満たしたうえで高いレベルを優先する
-            </li>
+            <li>{t("必須スキルはすべて満たす")}</li>
+            <li>{t("優先スキルは必須条件を満たしたうえで高いレベルを優先する")}</li>
           </ul>
           {metadata && metadataStatus === "ready" && (
             <p className="catalog-counts">
-              スキル {metadata.counts.skills} / 装備 {metadata.counts.equipment} /
-              装飾品 {metadata.counts.decorations}
+              {t("スキル")} {metadata.counts.skills} / {t("装備")} {metadata.counts.equipment} /{" "}
+              {t("装飾品")} {metadata.counts.decorations}
             </p>
           )}
         </div>
@@ -636,39 +654,33 @@ export default function App() {
       <main className="main-content" id="main-content">
         {metadataStatus === "loading" && (
           <section aria-live="polite" className="state-card">
-            <h2>データを読み込んでいます…</h2>
+            <h2>{t("データを読み込んでいます…")}</h2>
           </section>
         )}
 
         {metadataStatus === "unconfigured" && (
           <section className="state-card status-card" role="status">
-            <p className="state-label">公開状況</p>
-            <h2>検索APIを準備しています</h2>
-            <p>
-              Web画面は公開済みです。検索サーバーへ接続後、スキル検索をご利用いただけます。mock結果は表示しません。
-            </p>
+            <p className="state-label">{t("公開状況")}</p>
+            <h2>{t("検索APIを準備しています")}</h2>
+            <p>{t("Web画面は公開済みです。検索サーバーへ接続後、スキル検索をご利用いただけます。mock結果は表示しません。")}</p>
             <button
               className="primary-button compact-button"
               onClick={retryMetadata}
               type="button"
-            >
-              接続を再確認
-            </button>
+            >{t("接続を再確認")}</button>
           </section>
         )}
 
         {metadataStatus === "error" && (
           <section aria-live="assertive" className="state-card error-card" role="alert">
-            <p className="state-label">接続エラー</p>
-            <h2>データを読み込めませんでした</h2>
-            <p>時間をおいて接続を再確認してください。</p>
+            <p className="state-label">{t("接続エラー")}</p>
+            <h2>{t("データを読み込めませんでした")}</h2>
+            <p>{t("時間をおいて接続を再確認してください。")}</p>
             <button
               className="primary-button compact-button"
               onClick={retryMetadata}
               type="button"
-            >
-              再試行
-            </button>
+            >{t("再試行")}</button>
           </section>
         )}
 
@@ -677,29 +689,29 @@ export default function App() {
             <form className="search-form" onSubmit={handleSubmit}>
               <section aria-labelledby="search-conditions-heading" className="form-card">
                 <div className="section-heading">
-                  <p className="section-kicker">検索条件</p>
-                  <h2 id="search-conditions-heading">装備構成を探す</h2>
+                  <p className="section-kicker">{t("検索条件")}</p>
+                  <h2 id="search-conditions-heading">{t("装備構成を探す")}</h2>
                 </div>
 
                 <div className="top-fields">
                   <div className="field">
-                    <label htmlFor="weapon-kind">武器種</label>
+                    <label htmlFor="weapon-kind">{t("武器種")}</label>
                     <select
                       id="weapon-kind"
                       onChange={(event) => setWeaponKind(event.currentTarget.value)}
                       value={weaponKind}
                     >
-                      <option value="">指定なし</option>
+                      <option value="">{t("指定なし")}</option>
                       {metadata.weapon_kinds.map((kind) => (
                         <option key={kind} value={kind}>
-                          {kind}
+                          {t(kind)}
                         </option>
                       ))}
                     </select>
                   </div>
 
                   <div className="field">
-                    <label htmlFor="max-results">表示件数</label>
+                    <label htmlFor="max-results">{t("表示件数")}</label>
                     <input
                       aria-describedby={!maxResultsValid ? "max-results-error" : undefined}
                       aria-invalid={!maxResultsValid}
@@ -713,19 +725,17 @@ export default function App() {
                       value={maxResults}
                     />
                     {!maxResultsValid && (
-                      <span className="field-error" id="max-results-error">
-                        1から20の整数を入力してください。
-                      </span>
+                      <span className="field-error" id="max-results-error">{t("1から20の整数を入力してください。")}</span>
                     )}
                   </div>
                 </div>
 
                 <SkillSection
-                  addLabel="必須スキルを追加"
+                  addLabel={t("必須スキルを追加")}
                   canAdd={canAddRequired}
-                  description="すべて満たす必要があります"
-                  heading="必須スキル"
-                  levelLabel="最低レベル"
+                  description={t("すべて満たす必要があります")}
+                  heading={t("必須スキル")}
+                  levelLabel={t("最低レベル")}
                   onAdd={() => addRow(setRequiredRows)}
                   onLevelChange={(key, level) =>
                     changeRowLevel(setRequiredRows, key, level)
@@ -734,18 +744,18 @@ export default function App() {
                   onSkillChange={(key, skillId) =>
                     changeRowSkill(setRequiredRows, key, skillId)
                   }
-                  removeLabel="必須スキルを削除"
+                  removeLabel={t("必須スキルを削除")}
                   rows={requiredRows}
                   sectionId="required"
                   skills={sortedSkills}
                 />
 
                 <SkillSection
-                  addLabel="優先スキルを追加"
+                  addLabel={t("優先スキルを追加")}
                   canAdd={canAddPreference}
-                  description="必須条件を満たしたうえで、合計レベルが高い構成を優先します"
-                  heading="優先スキル"
-                  levelLabel="目標レベル"
+                  description={t("必須条件を満たしたうえで、合計レベルが高い構成を優先します")}
+                  heading={t("優先スキル")}
+                  levelLabel={t("目標レベル")}
                   onAdd={() => addRow(setPreferenceRows)}
                   onLevelChange={(key, level) =>
                     changeRowLevel(setPreferenceRows, key, level)
@@ -754,7 +764,7 @@ export default function App() {
                   onSkillChange={(key, skillId) =>
                     changeRowSkill(setPreferenceRows, key, skillId)
                   }
-                  removeLabel="優先スキルを削除"
+                  removeLabel={t("優先スキルを削除")}
                   rows={preferenceRows}
                   sectionId="preference"
                   skills={sortedSkills}
@@ -762,34 +772,34 @@ export default function App() {
 
                 <div className="submit-row">
                   <fieldset className="form-section">
-                    <legend>所持品と計算方法</legend>
-                    <label><input type="checkbox" checked={owned} onChange={(event) => { setOwned(event.currentTarget.checked); setAcknowledgeExclusions(null); }} />所持品を考慮する</label>
-                    <p>チェッカーと同じブラウザ内の保存データを使用します。未登録の装飾品は0個、護石は所持している個体のみを検索します。</p>
+                    <legend>{t("所持品と計算方法")}</legend>
+                    <label><input type="checkbox" checked={owned} onChange={(event) => { setOwned(event.currentTarget.checked); setAcknowledgeExclusions(null); }} />{t("所持品を考慮する")}</label>
+                    <p>{t("チェッカーと同じブラウザ内の保存データを使用します。未登録の装飾品は0個、護石は所持している個体のみを検索します。")}</p>
                     {owned && <InventoryNotice onStateChange={setInventoryConfirmation} />}
-                    {owned && <label><input type="checkbox" disabled={!inventoryConfirmation} checked={Boolean(inventoryConfirmation && acknowledgeExclusions?.raw === inventoryConfirmation.raw && acknowledgeExclusions?.catalogRevision === inventoryConfirmation.catalogRevision)} onChange={(event) => setAcknowledgeExclusions(event.currentTarget.checked ? inventoryConfirmation : null)} />カタログ変更を確認し、現在使えない所持品を検索から除外する（保存データは保持）</label>}
-                    <label htmlFor="search-engine">計算方法</label>
+                    {owned && <label><input type="checkbox" disabled={!inventoryConfirmation} checked={Boolean(inventoryConfirmation && acknowledgeExclusions?.raw === inventoryConfirmation.raw && acknowledgeExclusions?.catalogRevision === inventoryConfirmation.catalogRevision)} onChange={(event) => setAcknowledgeExclusions(event.currentTarget.checked ? inventoryConfirmation : null)} />{t("カタログ変更を確認し、現在使えない所持品を検索から除外する（保存データは保持）")}</label>}
+                    <label htmlFor="search-engine">{t("計算方法")}</label>
                     <select id="search-engine" value={engine} onChange={(event) => setEngine(event.currentTarget.value as Engine)}>
-                      <option value="browser">ブラウザ内で計算する</option>
-                      <option value="auto">利用可能ならサーバー、利用できなければブラウザ</option>
+                      <option value="browser">{t("ブラウザ内で計算する")}</option>
+                      <option value="auto">{t("利用可能ならサーバー、利用できなければブラウザ")}</option>
                     </select>
-                    <p>サーバー検索が有効な場合のみ、検索に必要なスキル・所持数・護石能力を送信します。プロフィールID・名前・更新日時は送信しません。追加費用を防ぐため現在の公開設定はブラウザ計算です。</p>
+                    <p>{t("サーバー検索が有効な場合のみ、検索に必要なスキル・所持数・護石能力を送信します。プロフィールID・名前・更新日時は送信しません。追加費用を防ぐため現在の公開設定はブラウザ計算です。")}</p>
                   </fieldset>
                   <button
                     className="primary-button submit-button"
                     disabled={!formValid || isSearching}
                     type="submit"
                   >
-                    {isSearching ? "検索中…" : "検索する"}
+                    {t(isSearching ? "検索中…" : "検索する")}
                   </button>
-                  {isSearching && <button type="button" onClick={() => { searchControllerRef.current?.abort(); searchControllerRef.current = null; searchInFlightRef.current = false; setIsSearching(false); setProgress("検索を中断しました。"); }}>検索を中断</button>}
+                  {isSearching && <button type="button" onClick={() => { searchControllerRef.current?.abort(); searchControllerRef.current = null; searchInFlightRef.current = false; setIsSearching(false); setProgress("検索を中断しました。"); }}>{t("検索を中断")}</button>}
                 </div>
-                <p role="status">{activeEngine}{progress && `・${progress}`}</p>
+                <p role="status">{t(activeEngine)}{progress && `${locale === "ja" ? "・" : " · "}${t(progress)}`}</p>
               </section>
             </form>
 
             {searchError && (
               <div aria-live="assertive" className="search-error" role="alert">
-                {searchError}
+                {t(searchError)}
               </div>
             )}
 
@@ -801,4 +811,8 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+export default function App() {
+  return <LocaleProvider><Simulator /></LocaleProvider>;
 }
