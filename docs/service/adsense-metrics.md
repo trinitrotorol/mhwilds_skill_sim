@@ -15,7 +15,7 @@ Web サイトのビルドやブラウザから呼び出しません。広告の�
 5. 通常利用する Windows ユーザーで、ネイティブ Windows Python を使って以下を実行します。
 
 ```powershell
-& 'C:\Users\trini\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' scripts/adsense_metrics.py auth --client-config 'C:\private\adsense-desktop-client.json'
+& 'C:\Users\trini\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' scripts/adsense_metrics.py --state-dir 'C:\Users\trini\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\trinitrotorol\site-metrics' auth --client-config 'C:\private\adsense-desktop-client.json'
 ```
 
 CLI が表示する Google の URL をブラウザで開き、対象の AdSense アカウントを選んで
@@ -26,6 +26,12 @@ PKCE S256 とランダムな state を使用し、コールバックは `127.0.0
 異なるアカウントを自動選択することはありません。
 
 Windows の既定保存先は `%LOCALAPPDATA%\trinitrotorol\site-metrics` です。
+この PC では、初回認可・状態確認・定期取得のすべてで上記の `--state-dir` を明示し、
+実体の `C:\Users\trini\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\trinitrotorol\site-metrics` に統一します。
+Windows Store 版 Codex の仮想化では、昇格・非昇格など実行方法によって `%LOCALAPPDATA%` が異なり、
+通常の `AppData\Local` を絶対パスで指定してもパッケージの `LocalCache` 配下へ転送される場合があります。
+保存先の解釈を揃えるため、上記の実体パスを使用します。異なる保存先を見たことによる
+`auth_required` は、Google 側の認可失効とは区別します。
 `credentials.json` のクライアント情報と refresh token は Windows DPAPI CurrentUser で暗号化します。
 同じ Windows ユーザーで実行してください。短命の access token は保存しません。
 認可済みのローカル保存を確認後、ダウンロードした平文クライアント JSON は安全に削除できます。
@@ -38,8 +44,8 @@ Windows と WSL は別の保存先・暗号化方式なので、Windows の定�
 ## 定期取得と状態
 
 ```powershell
-& 'C:\Users\trini\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' scripts/adsense_metrics.py status
-& 'C:\Users\trini\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' scripts/adsense_metrics.py collect
+& 'C:\Users\trini\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' scripts/adsense_metrics.py --state-dir 'C:\Users\trini\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\trinitrotorol\site-metrics' status
+& 'C:\Users\trini\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' scripts/adsense_metrics.py --state-dir 'C:\Users\trini\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\trinitrotorol\site-metrics' collect
 ```
 
 `status` は保存済み設定をローカルで確認するだけで、認可の有効性や API 接続成功を意味しません。
@@ -51,11 +57,12 @@ Windows と WSL は別の保存先・暗号化方式なので、Windows の定�
 成功時のレポートは同じ非公開フォルダーの `latest-report.json` に原子的に保存します。
 取得失敗では前回の成功レポートを上書きしません。必ず今回の終了状態と `collected_at` を確認し、
 古い成功ファイルを今回の実績として扱わないでください。標準出力は取得時刻・件数・注意情報の件数だけです。
-明示的な保存先は `collect --output C:\private\report.json`、状態フォルダーは
-`--state-dir C:\private\site-metrics collect` で指定できます。
+レポートの別保存先は、上記と同じ `--state-dir` を付けて
+`collect --output C:\private\report.json` と指定できます。
+`--state-dir` は `auth`・`status`・`collect` のサブコマンドより前に指定します。
 Git リポジトリ内（無視ファイルを含む）、`public`・`dist`・`service-assets`、シンボリックリンクは拒否します。
 
-月曜・木曜 09:00 **日本時間** のチャット定期実行からこの `collect` を実行します。
+月曜・木曜 09:00 **日本時間** のチャット定期実行でも、上記の保存先を明示した `collect` を実行します。
 スケジュールの時刻と集計の日付のタイムゾーンは別です。
 集計は AdSense アカウントの `timeZone.id` と `ACCOUNT_TIME_ZONE` を使用し、
 当日を除く直近 7 日・その前の 7 日・直近 28 日・その前の 28 日を取得します。
