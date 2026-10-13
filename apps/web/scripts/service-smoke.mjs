@@ -349,7 +349,7 @@ try {
     } finally { await zoomContext.close(); }
   });
   await step("visible service context and canonical metadata without JavaScript", async () => {
-    const requiredLinks = ["/", "/game-guide/", "/game-guide/mhwilds-guide/", "/about/", "/privacy/", "/contact/"].map((path) => `https://trinitrotorol.com${path}`);
+    const requiredLinks = ["/", "/game-guide/", "/game-guide/mhwilds-guide/", "/en/game-guide/mhwilds-guide/", "/about/", "/privacy/", "/contact/"].map((path) => `https://trinitrotorol.com${path}`);
     const metadata = [];
     const noScriptContext = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 568 }, locale: "ja-JP" });
     await track(noScriptContext);

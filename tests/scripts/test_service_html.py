@@ -148,6 +148,22 @@ def test_built_module_and_existing_assets_survive_without_relaxing_csp():
     )
 
 
+@pytest.mark.parametrize(
+    "app_path", [script.SIM_PATH, script.CHECKER_PATH, *script.LEGACY_PATHS]
+)
+def test_both_language_guides_are_crawlable_without_javascript(app_path):
+    html = script.enrich_html(SHELL, app_path, f"/{app_path}/assets/context.css")
+    page = Page(html)
+    english = f"{script.ROOT_ORIGIN}/en/game-guide/mhwilds-guide/"
+    japanese = f"{script.ROOT_ORIGIN}/game-guide/mhwilds-guide/"
+    assert page.attributes("a", href=english)
+    assert page.attributes("a", href=japanese)
+    assert "Wilds tool guide (English)" in html
+    assert "ワイルズツールの使い方（英語）" in html
+    assert len(script.SITE_LINKS) == len(script.ENGLISH_SITE_LABELS)
+    assert not page.attributes("script", src=english)
+
+
 def test_editorial_text_is_escaped_in_metadata_and_visible_copy(monkeypatch):
     payload = '"><script src="https://evil.invalid/x.js"></script>&'
     original = script.PAGES[script.CHECKER_PATH]
