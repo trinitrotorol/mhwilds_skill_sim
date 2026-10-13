@@ -146,6 +146,7 @@ ENGLISH_PAGES = {
 SITE_LINKS = (
     (f"{ROOT_ORIGIN}/game-guide/", "ゲーム攻略・ツール一覧"),
     (f"{ROOT_ORIGIN}/game-guide/mhwilds-guide/", "ワイルズツールの使い方"),
+    (f"{ROOT_ORIGIN}/en/game-guide/mhwilds-guide/", "ワイルズツールの使い方（英語）"),
     (f"{ROOT_ORIGIN}/about/", "運営者情報"),
     (f"{ROOT_ORIGIN}/privacy/", "プライバシーポリシー"),
     (f"{ROOT_ORIGIN}/contact/", "お問い合わせ"),
@@ -154,6 +155,7 @@ SITE_LINKS = (
 ENGLISH_SITE_LABELS = (
     "Game guides and tools (Japanese)",
     "Wilds tool guide (Japanese)",
+    "Wilds tool guide (English)",
     "About this site (Japanese)",
     "Privacy policy (Japanese)",
     "Contact (Japanese)",
