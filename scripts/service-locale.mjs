@@ -6,7 +6,7 @@ function syncLocale() {
   for (const element of document.querySelectorAll("[data-service-text-ja]")) {
     element.textContent = element.getAttribute(`data-service-text-${locale}`);
   }
-  for (const attribute of ["content", "aria-label"]) {
+  for (const attribute of ["content", "aria-label", "href"]) {
     for (const element of document.querySelectorAll(`[data-service-${attribute}-ja]`)) {
       element.setAttribute(attribute, element.getAttribute(`data-service-${attribute}-${locale}`));
     }

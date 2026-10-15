@@ -396,6 +396,27 @@ try {
     assert.notEqual(metadata[0].description, metadata[1].description);
     return metadata;
   });
+  await step("primary guide links follow English and Japanese selections", async () => {
+    const japaneseGuide = "https://trinitrotorol.com/game-guide/mhwilds-guide/";
+    const englishGuide = "https://trinitrotorol.com/en/game-guide/mhwilds-guide/";
+    for (const [kind, page] of [["checker", checker], ["sim", sim]]) {
+      const fixedLinks = () => page.locator(".service-information-links a").evaluateAll((links) => links.map((link) => link.href));
+      const before = await fixedLinks();
+      for (const [locale, target, navLabel, overviewLabel] of [
+        ["en", englishGuide, "User guide", "Usage and search result guide"],
+        ["ja", japaneseGuide, "使い方", "詳しい使い方と検索結果の見方"],
+      ]) {
+        await page.getByLabel("言語 / Language").selectOption(locale);
+        await page.waitForFunction((expected) => {
+          const links = [...document.querySelectorAll("a[data-service-href-ja]")];
+          return links.length === 2 && links.every((link) => link.href === expected);
+        }, target);
+        assert.equal(await page.locator(".service-context-nav").getByRole("link", { name: navLabel, exact: true }).getAttribute("href"), target, kind);
+        assert.equal(await page.locator(".service-related-links").getByRole("link", { name: overviewLabel, exact: true }).getAttribute("href"), target, kind);
+        assert.deepEqual(await fixedLinks(), before, kind + ": explicit language footer links remain fixed");
+      }
+    }
+  });
   activePage = sim;
   await step("cancel active search and stay responsive", async () => {
     await sim.setViewportSize({ width: 1440, height: 900 });
