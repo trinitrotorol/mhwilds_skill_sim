@@ -344,14 +344,19 @@ def enrich_html(
         related_url = f"/{related_legacy}/?legacy=1"
     else:
         related_url = f"/{page.related_path}/"
+    guide_href = translated_attribute(
+        "href",
+        f"{ROOT_ORIGIN}/game-guide/mhwilds-guide/",
+        f"{ROOT_ORIGIN}/en/game-guide/mhwilds-guide/",
+    )
     navigation = (
         '\n<nav class="service-context-nav" '
         f"{translated_attribute('aria-label', 'サイトナビゲーション', 'Site navigation')}>"
         f'<a href="{ROOT_ORIGIN}/">trinitrotorol</a>'
         f'<a href="{ROOT_ORIGIN}/game-guide/">'
         f"{bilingual('ゲーム攻略・ツール', 'Game guides and tools (Japanese)')}</a>"
-        f'<a href="{ROOT_ORIGIN}/game-guide/mhwilds-guide/">'
-        f"{bilingual('使い方', 'User guide (Japanese)')}</a></nav>\n"
+        f"<a {guide_href}>"
+        f"{bilingual('使い方', 'User guide')}</a></nav>\n"
         f"{migration}"
         '<noscript><main class="service-script-notice" '
         'aria-labelledby="service-no-script-title">'
@@ -364,8 +369,8 @@ def enrich_html(
         )
         + '</p><p><a href="#service-overview">'
         + bilingual("このツールの説明を読む", "Read the tool overview")
-        + f'</a></p><p><a href="{ROOT_ORIGIN}/game-guide/mhwilds-guide/">'
-        + bilingual("詳しい使い方を読む", "Read the full guide (Japanese)")
+        + f"</a></p><p><a {guide_href}>"
+        + bilingual("詳しい使い方を読む", "Read the full guide")
         + "</a></p>"
         "</main></noscript>\n"
     )
@@ -386,8 +391,8 @@ def enrich_html(
         f"<h3>{bilingual('利用前に確認すること', 'Before you start')}</h3>"
         f"<p>{bilingual(page.limitation, english.limitation)}</p>"
         '<p class="service-related-links">'
-        f'<a href="{ROOT_ORIGIN}/game-guide/mhwilds-guide/">'
-        f"{bilingual('詳しい使い方と検索結果の見方', 'Usage and search result guide (Japanese)')}</a>"
+        f"<a {guide_href}>"
+        f"{bilingual('詳しい使い方と検索結果の見方', 'Usage and search result guide')}</a>"
         f'<a href="{escape(related_url)}">{bilingual(page.related_label, english.related_label)}</a></p>'
         '<p class="service-independence">'
         + bilingual(

@@ -164,6 +164,28 @@ def test_both_language_guides_are_crawlable_without_javascript(app_path):
     assert not page.attributes("script", src=english)
 
 
+@pytest.mark.parametrize("app_path", [*script.PAGES, *script.LEGACY_PATHS])
+def test_primary_guide_links_follow_locale_and_keep_explicit_footer_links(app_path):
+    html = script.enrich_html(SHELL, app_path, f"/{app_path}/assets/context.css")
+    page = Page(html)
+    japanese = f"{script.ROOT_ORIGIN}/game-guide/mhwilds-guide/"
+    english = f"{script.ROOT_ORIGIN}/en/game-guide/mhwilds-guide/"
+    localized = page.attributes("a", **{"data-service-href-ja": japanese})
+    # Navigation, no-script help, and the overview all share the correct targets.
+    assert len(localized) == 3
+    assert all(link["href"] == japanese for link in localized)
+    assert all(link["data-service-href-en"] == english for link in localized)
+    # Explicit language choices in the footer are never rewritten by the locale.
+    fixed = [
+        link for link in page.attributes("a") if "data-service-href-ja" not in link
+    ]
+    assert sum(link["href"] == japanese for link in fixed) == 1
+    assert sum(link["href"] == english for link in fixed) == 1
+    assert "User guide (Japanese)" not in html
+    assert "Usage and search result guide (Japanese)" not in html
+    assert "Read the full guide (Japanese)" not in html
+
+
 def test_editorial_text_is_escaped_in_metadata_and_visible_copy(monkeypatch):
     payload = '"><script src="https://evil.invalid/x.js"></script>&'
     original = script.PAGES[script.CHECKER_PATH]
