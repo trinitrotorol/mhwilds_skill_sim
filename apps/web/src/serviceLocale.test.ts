@@ -1,6 +1,9 @@
 import { waitFor } from "@testing-library/dom";
 import { expect, it } from "vitest";
-import localeScript from "../../../scripts/service-locale.mjs?raw";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const localeScript = readFileSync(resolve(process.cwd(), "../../scripts/service-locale.mjs"), "utf8");
 
 const japanese = "https://trinitrotorol.com/game-guide/mhwilds-guide/";
 const english = "https://trinitrotorol.com/en/game-guide/mhwilds-guide/";
